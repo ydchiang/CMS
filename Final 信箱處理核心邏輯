@@ -1,1 +1,2862 @@
+Use "TVUtility"
+Use "MailCustomLibary"
 
+
+Dim contractObjectCount As Integer
+Dim errDB As NotesDatabase
+Private CMS_DB As NotesDatabase '201911 for SCMS
+Private GCMS_DB As NotesDatabase '201911 for SCMS
+Private SCMS_DB As NotesDatabase '201911 for SCMS
+Private cmsDBProfile As NotesDocument '201911 for SCMS
+Private GPetition_DB As NotesDatabase '201911 for SCMS
+Private MonitorForm_DB As NotesDatabase 'MonitorForm DB
+Private xInBoxNaDsp As String '202305 新增信箱名稱
+Private xInBoxKey As String '
+Private xSrcType As String
+Private xMailViewNa As String
+Private xProcFlagFieldNa As String
+Private mailDB As NotesDatabase
+Dim xFormType As String ' 202403 判斷主旨Type
+Private caseDoc As NotesDocument '2026.01.05
+
+
+Sub Initialize 'Formal Final
+        On Error Goto err_handle         
+        Dim s As New NotesSession
+        Dim db As NotesDatabase
+        Dim Mailview As NotesView
+        Dim Maildoc As NotesDocument
+        Dim Cmsview As NotesView
+        Dim Cmsdoc As NotesDocument
+        Dim GCmsview As NotesView
+        Dim GCmsdoc As NotesDocument
+        Dim gfdoc As NotesDocument
+        Dim gfview As NotesView
+        Dim gNofiledoc As NotesDocument
+        Dim cNofiledoc As NotesDocument
+        Dim dbinfoProfile As NotesDocument
+        Dim syssetupview As NotesView
+        Dim syssetupdoc As NotesDocument
+        Dim attachCount As Integer
+        Dim tmpSubject As String
+        Dim tmpSubject1 As String
+        Dim rtitem1 As  NotesRichTextItem
+        Dim username As NotesName
+        Dim mailName As NotesName
+        Dim xName As NotesName
+        Dim xitemProcFlag As NotesItem
+        Dim CurAgent As NotesAgent         
+        Dim agdoc As NotesDocument
+        
+        Set db = s.CurrentDatabase                
+        
+        Set CurAgent=s.CurrentAgent 
+        Set agdoc=db.GetDocumentByID(CurAgent.ParameterDocID)
+        xmailServer=agdoc.xmailServer(0)
+        xmailFilePath=agdoc.xmailFilePath(0)
+        xInBoxKey=agdoc.xInBoxKey(0) 'cmssfinal
+        xSrcType=agdoc.xSrcType(0) 'cmsfinal
+        xMailViewNa=agdoc.xMailViewNa(0)
+        xMailViewNonChkNa=agdoc.xMailViewNonChkNa(0)
+        xProcFlagFieldNa=agdoc.xProcFlagFieldNa(0)
+        
+        Set mailDB=s.GetDatabase(xmailServer,xmailFilePath,False)        
+        xInBoxNaDsp=mailDB.Title '202305 新增信箱名稱
+        Print Cstr(Now)+"........"+xInBoxKey+" \ CmsGcmsFinalFormalAgentByMailDb...."+mailDB.Server+"....."+mailDB.FilePath
+        '>>>>>201911 for SCMS
+        Dim DBProfile As NotesDocument
+        Set DBProfile = db.Getprofiledocument("DBInfo Profile")
+        Set CMS_DB=s.Getdatabase(DBProfile.CMSServer(0), DBProfile.CMSFilePath(0))
+        Set cmsDBProfile=CMS_DB.GetProfileDocument("DBInfoProfile")
+        Set GCMS_DB=s.GetDatabase(cmsDBProfile.GCMSServer(0),cmsDBProfile.GCMSDBFilePath(0),False)        
+        Set SCMS_DB=s.GetDatabase(cmsDBProfile.SCMSServer(0),cmsDBProfile.SCMSPath(0),False)        
+        Set GPetition_DB=s.GetDatabase(cmsDBProfile.GCmspetitionServer(0),cmsDBProfile.GCmspetitionFilePath(0),False)        
+        Set MonitorForm_DB=s.GetDatabase(cmsDBProfile.MonitorFormServer(0),cmsDBProfile.MonitorFormPath(0),False)        
+        Dim SCmsview As NotesView
+        Dim SCmsdoc As NotesDocument
+        Dim ChgFlowAgent As NotesAgent
+        Set SCmsview=SCMS_DB.GetView("vforinboxreply")
+        '<<<<<201911 for SCMS
+        Set Mailview = mailDB.GetView(xMailViewNa)
+        Set Maildoc = Mailview.GetFirstDocument        
+        'Set Cmsview=CMS_DB.GetView("ApplyFlowNo")
+        Set Cmsview=CMS_DB.GetView("ApplyFlowNo_ALL") ' 2022/10 新舊案號皆需處理(用印)
+        'Set GCmsview=GCMS_DB.GetView("GTDocNoFinalFormalForMailCheck")
+        Set GCmsview=GCMS_DB.GetView("GTDocNoFinalForMailCheck_ALL") ' 2022/10 新舊案號皆需處理(GCMS ALL)
+        Dim dummyDoc As New NotesDocument(db)
+        Dim memo As NotesDocument
+        Dim cc(8) As Variant
+        Dim mailStr As String
+        Dim bodyStr As String
+        Dim Style As NotesRichTextStyle, reStyle As NotesRichTextStyle
+        Dim approverNameItem As NotesItem
+        Dim approvalDateItem As NotesItem
+        Dim approvalCommentItem As NotesItem
+        Dim approverNameEngItem As NotesItem        'for Req. HA900168
+        Dim approvalCommentEngItem As NotesItem        'for Req. HA900168
+        Dim tmpform As String
+        Dim blindCopyTo(4) As String
+        blindCopyTo(0) ="Elaine Liang/TAIWAN/MXIC"
+        
+        Dim nextMailDoc As NotesDocument
+        '>>>>202101 CMS Final 解決頓號程式
+        Dim MutiCaseProcessDoc As NotesDocument
+        Dim MutiCaseProcessAgent As NotesAgent
+        Set MutiCaseProcessAgent=CMS_DB.GetAgent("(cmsMultiCaseMailFinalPatch)")
+        '<<<<<202101 
+        
+        '>>>>>Mail 改郵件通知設定 取得法務主管
+        Dim xMailKey As String
+        Dim xLegalLeader As String 
+        Set systemprofile = CMS_DB.GetProfileDocument("SystemProfile")
+        xLegalLeader=systemprofile.IPLLeaderUserName(0)
+        '<<<<<Mail 改郵件通知設定
+        
+        While Not Maildoc Is Nothing
+                'Legal System Phase 19 (解決deliveredDate 為空信件問題)
+                If Maildoc.DeliveredDate(0)="" Then
+                        Maildoc.DeliveredDate = Now
+                End If
+                attachCount=0
+                Set nextMailDoc=Mailview.GetNextDocument(maildoc)
+                
+                Set xitemProcFlag=GetItemObj(Maildoc,xProcFlagFieldNa,"")
+                If Maildoc.Subject(0)<>"" Then
+                        tmpSubject=Trim(Strleft(Maildoc.Subject(0),"-")) '取No.
+                        If tmpSubject="" Then
+                                tmpSubject=Trim(Maildoc.Subject(0))
+                        End If
+                        '多重案號處理------->
+                        If Instr(tmpSubject,"、")<> 0 Then
+                                Call NotifyMutiCaseToIT(tmpSubject) '多案號通知 IT 人員
+                                tmpSubject=Trim(Strleft(Maildoc.Subject(0),"、")) '取No. Muti Case 只取第一筆
+                                isMutiCase="Y" '202101 CMS Final 解決頓號外掛程式
+                        Else '202101
+                                isMutiCase="N" ''202101
+                        End If
+                        '-------------------------->
+                        tmpform=""
+                        tmpform=Strright(Strleft(maildoc.From(0),">"),"<")
+                        If tmpform="" Then
+                                tmpform=Trim(maildoc.From(0))
+                        End If                
+                        Set rtitem1 = Maildoc.GetFirstItem("Body")
+                        If Isempty(rtitem1.EmbeddedObjects)= False Then
+                                Forall o In rtitem1.EmbeddedObjects
+                                        Select Case o.Type
+                                        Case EMBED_ATTACHMENT:
+                                                attachCount = attachCount + 1
+                                        End Select        
+                                End Forall
+                        End If
+                        attachCount=1  '201911 for 取消判斷附件
+                        xFormType=getSubjectFormType(tmpSubject)                ' 202403 依主旨區分SCMS / CMS / GCSM
+                        If CheckMailFrom(maildoc,tmpform)="Y"  Or CheckFVLegal(maildoc,tmpform,tmpsubject)="Y" Then
+                                If attachCount >0 Then
+                                        '>>>>>201911 for SCMS
+                                '        If Ucase$(Left(tmpSubject,2))="SS" Or Ucase$(Right(Left(tmpSubject,5),2))="SS" Then
+                                        If xFormType="SCMS" Then        
+                                                Set SCmsdoc=SCmsview.GetDocumentByKey(tmpSubject,True)
+                                                Set syssetupview=SCMS_DB.GetView("vSysSetupDoc")
+                                                Set syssetupdoc=syssetupview.GetDocumentByKey("$fSysDoc",True)
+                                                
+                                                Path=|@ReplaceSubString(SCMSPath;"\\";"/")| '201911 for SCMS
+                                                DbPath=Evaluate(path,cmsDBProfile) '201911 for SCMS
+                                                If Not syssetupdoc Is Nothing Then
+                                                        xUrl=syssetupdoc.ExtInternetURL(0)
+                                                End If
+                                                If Not SCmsdoc Is Nothing Then
+                                                        Set approverNameItem = SCmsdoc.GetFirstItem("ApproverName")
+                                                        Set approvalDateItem = SCmsdoc.GetFirstItem("ApprovalDate")
+                                                        Set approvalCommentItem = SCmsdoc.GetFirstItem("ApprovalComment")
+                                                        Set approverNameEngItem = SCmsdoc.GetFirstItem("ApproverNameEng")
+                                                        Set approvalCommentEngItem = SCmsdoc.GetFirstItem("ApprovalCommentEng")
+                                                        
+                                                        Call approverNameItem.AppendToTextList(xInBoxKey)
+                                                        Call approvalDateItem.AppendToTextList(Format(dummyDoc.Created , "yyyy/mm/dd hh:nn:ss"))
+                                                        Call approverNameEngItem.AppendToTextList(xInBoxKey)
+                                                        
+                                                        '202011/05 identify mail form Log --------------------------Start 
+                                                     '標示該最終版為FV承辦法務所發送
+                                                        Set mailName =New NotesName(tmpform)
+                                                        If mailName.Common = "DeployAdmin" Then
+                                                                Set xName = New NotesName(Maildoc.ExecuteBy(0))
+                                                                Call approvalCommentItem.AppendToTextList("同意簽出(by "+xInBoxKey+". by "+ xName.Common + " activate CV to FV)")
+                                                                Call approvalCommentEngItem.AppendToTextList("Submit.(by "+xInBoxKey+". by "+ xName.Common + " activate CV to FV)")                                         
+                                                        Else
+                                                                Call approvalCommentItem.AppendToTextList("同意簽出(by "+xInBoxKey+". by "+ mailName.Common + ")")
+                                                                Call approvalCommentEngItem.AppendToTextList("Submit.(by "+xInBoxKey+". by "+ mailName.Common + ")") 
+                                                        End If
+                                                        '202011/05 identify mail form Log --------------------------End 
+                                                        
+                                                        url2=xUrl+"/"+DbPath(0)+"/0/"+SCmsdoc.Universalid+"?OpenDocument"        '文件連結
+                                                        
+                                                        Call ProcessAttachmentSCMS(SCmsdoc,Maildoc)        
+                                                        
+                                                        If SCmsdoc.Subsidiary(0)="MXA" Or SCmsdoc.Subsidiary(0)="MXE" Or SCmsdoc.Subsidiary(0)="MXHK" Or SCmsdoc.Subsidiary(0)="MXK" Or SCmsdoc.Subsidiary(0)="MXm" Or SCmsdoc.Subsidiary(0)="MXS" Or SCmsdoc.Subsidiary(0)="MXJ" Then
+                                                                'blindCopyTo(4)="Sally Wang/TAIWAN/MXIC"
+                                                        End If
+                                                        
+                                                        Set memo=db.createdocument()
+                                                        memo.form = "Memo"        
+%REM        
+                                                        'Mail 改郵件通知設定
+                                                        memo.SendTo = SCmsdoc.IPLUserName '201912 法務人員改多重值
+                                                        cc(0) = SCmsdoc.SUserEMail(0)
+                                                        cc(1)= SCmsdoc.CoUserEMail(0)
+                                                        cc(2)= SCmsdoc.CoUserEMail2(0)
+                                                        memo.CopyTo= cc        
+%END REM
+                                                        memo.BlindCopyTo=blindCopyTo
+                                                        memo.From="SCMS系統通知"
+                                                        memo.Principal="SCMS系統通知"
+                                                        memo.DisplaySent="SCMS系統通知"
+                                                        Dim rtitem3 As New NotesRichTextItem(memo,"Body")
+                                                        memo.Subject = Maildoc.Subject(0)+"("+xInBoxNaDsp+"  系統通知)" '202305 新增信箱名稱
+                                                        
+                                                        If (SCmsdoc.SLanType(0)<>"CHN") Or (SCmsdoc.CoLanType(0)<>"" And SCmsdoc.CoLanType(0)<>"CHN") Or (SCmsdoc.CoLanType2(0)<>"" And SCmsdoc.CoLanType2(0)<>"CHN") Then
+                                                                xMailKey="A:FinalAgent^^E:Initialize^cmssfinal_SCMS_ENG^1" 'Mail 改郵件通知設定
+                                                        Else
+                                                                xMailKey="A:FinalAgent^^E:Initialize^cmssfinal_SCMS_CHN^1" 'Mail 改郵件通知設定        
+                                                        End If
+                                                        '>>>>>Mail 改郵件通知設定
+                                                        SCmsdoc.TmpChiefMgrUserName=getChiefMgrUserNameByDoc(SCmsdoc,"SCMS") 
+                                                        SCmsdoc.TmpLegalLeader=xLegalLeader
+                                                        Set setupdoc=getMailSettingResultDbDoc(CMS_DB,SCmsdoc.ParentDatabase,SCmsdoc,xMailKey,"") 'Mail 改郵件通知設定
+                                                        SCmsdoc.RemoveItem("TmpChiefMgrUserName")
+                                                        SCmsdoc.RemoveItem("TmpLegalLeader")
+                                                        xbody=setupdoc.Resbody(0)
+                                                        memo.SendTo=setupdoc.ResSendTo
+                                                        memo.CopyTo=setupdoc.ResCopyTo
+                                                        '<<<<<Mail 改郵件通知設定
+                                                        Call rtitem3.AppendText(xbody)
+                                                        Call rtitem3.Addnewline(2)
+                                                        
+                                                        If (SCmsdoc.SLanType(0)<>"CHN") Or (SCmsdoc.CoLanType(0)<>"" And SCmsdoc.CoLanType(0)<>"CHN") Or (SCmsdoc.CoLanType2(0)<>"" And SCmsdoc.CoLanType2(0)<>"CHN") Then
+                                                                Call rtitem3.Appendtext("Apply Form Link: ")
+                                                        Else
+                                                                Call rtitem3.Appendtext("Apply Form Link: ")
+                                                        End If
+                                                        Call rtitem3.Addnewline(1)
+                                                        Call rtitem3.Appendtext(url2)
+                                                        Call rtitem3.Addnewline(2)
+                                                'End If
+                                                        Call memo.send(False)        'according to Stacey's email 2011/08/04
+                                                        
+                                                        Call SCmsdoc.Save(True,True)
+                                                        Call FillContractFinalName(SCmsdoc)  ' add by arwin 2013/03/21 '????????
+                                                        Call FillAuthContractFinalName(SCmsdoc)  ' add by arwin 2017/06/26 ????????????
+                                                        
+                                                        isReplyInbox="N"
+                                                        If isReplyInbox="Y" Then 'Reply, ReplyP
+                                                                Set ChgFlowAgent=SCMS_DB.GetAgent("(agChangeFlowTo0005)")  '承辦法務
+                                                        Elseif isReplyInbox="N" Then
+                                                                Set ChgFlowAgent=SCMS_DB.GetAgent("(agChangeFlowTo0001)")  '主辦人
+                                                        End If
+                                                        Set agent=SCMS_DB.GetAgent("(agCreateContractVerList)")   '新增歷版契約附件表格
+                                                        If s.IsOnServer Then
+                                                                If agent.Run(SCmsdoc.Noteid)=0 Then
+                                                                        Call ChgFlowAgent.Run(SCmsdoc.Noteid)
+                                                                End If
+                                                        Else
+                                                                If agent.RunOnServer(SCmsdoc.Noteid)=0 Then
+                                                                        Call ChgFlowAgent.RunOnServer(SCmsdoc.Noteid)
+                                                                End If
+                                                        End If
+                                                End If
+                                                '<<<<<201911 for SCMS        
+                                'If tmpform= "Stacey.Lee@bakermckenzie.com" Or tmpform="CN=Minshan Chung/OU=TAIWAN/O=MXIC" Or tmpform="CN=Stacey Lee/OU=TAIWAN/O=MXIC"  Then
+                                        '201911 for SCMS        
+                                '        Elseif Ucase$(Left(tmpSubject,1))="S" Or Ucase$(Left(tmpSubject,1))="D"Or Ucase$(Left(tmpSubject,1))="A" Or Ucase$(Left(tmpSubject,1))="C" Or Ucase$(Left(tmpSubject,1))="G" Or Ucase$(Left(tmpSubject,2))="SG" Or isCMSMType="Y" Or Ucase$(Left(tmpSubject,1))="B" Or Ucase$(Left(tmpSubject,5))="MXICS" Or Ucase$(Left(tmpSubject,6))="MXICSG" Or Ucase$(Left(tmpSubject,5))="MXICG" Then '制式契約
+                                        Elseif xFormType="CMS" Then        
+                                                '若在用印階段僅需補上記錄一筆歷版契約文件，並重劃表格                                                        
+                                                Set Cmsdoc=Cmsview.GetDocumentByKey(tmpSubject,True)        
+                                                isNotify="N" 'NEW 201808 新增歷版契約附件表格
+                                                If Not Cmsdoc Is Nothing Then
+                                                        Set systemprofile = CMS_DB.GetProfileDocument("SystemProfile")
+                                                        '>>>>
+                                                        If Maildoc.CntractDocUID(0)="" Then '未建Contract Doc. 
+                                                                isNotify="Y"
+                                                                Set approverNameItem = Cmsdoc.GetFirstItem("ApproverName")
+                                                                Set approvalDateItem = Cmsdoc.GetFirstItem("ApprovalDate")
+                                                                Set approvalCommentItem = Cmsdoc.GetFirstItem("ApprovalComment")
+                                                                Set approverNameEngItem = Cmsdoc.GetFirstItem("ApproverNameEng")
+                                                                Set approvalCommentEngItem = Cmsdoc.GetFirstItem("ApprovalCommentEng")
+                                                                
+                                                                Call approverNameItem.AppendToTextList(xInBoxKey)
+                                                                Call approvalDateItem.AppendToTextList(Cstr(Cstr(Format(dummyDoc.Created , "yyyy/mm/dd hh:nn:ss"))))
+                                                                Call approverNameEngItem.AppendToTextList(xInBoxKey)
+                                                                
+                                                            '202011/05 identify mail form Log --------------------------Start 
+                                                         '標示該最終版為FV承辦法務所發送
+                                                                Set mailName =New NotesName(tmpform)
+                                                                If mailName.Common = "DeployAdmin" Then
+                                                                        Set xName = New NotesName(Maildoc.ExecuteBy(0))
+                                                                        Call approvalCommentItem.AppendToTextList("同意簽出(by "+xInBoxKey+". by "+ xName.Common + " activate CV to FV)")
+                                                                        Call approvalCommentEngItem.AppendToTextList("Submit.(by "+xInBoxKey+". by "+ xName.Common + " activate CV to FV)")                                         
+                                                                Else
+                                                                        Call approvalCommentItem.AppendToTextList("同意簽出(by "+xInBoxKey+". by "+ mailName.Common + ")")
+                                                                        Call approvalCommentEngItem.AppendToTextList("Submit.(by "+xInBoxKey+". by "+ mailName.Common + ")") 
+                                                                End If
+                                                             '202011/05 identify mail form Log --------------------------End         
+                                                        End If
+                                                        '<<<<
+                                                        Call ProcessAttachment(Cmsdoc,Maildoc)        
+                                                        
+                                                        '>>>>NEW 201808 RTF顯示合約版本資訊 
+                                                        Set agent=CMS_DB.GetAgent("(agCreateContractVerList)")  
+                                                        If s.IsOnServer Then
+                                                                Call agent.Run(Cmsdoc.Noteid)
+                                                        Else
+                                                                Call agent.RunOnServer(Cmsdoc.Noteid)
+                                                        End If
+                                                        '<<<<NEW 201808 RTF顯示合約版本資訊
+                                                        
+                                                        'Call Cmsdoc.Save(True , True)
+                                                Else  'No 找不到或有誤 Alert Mail
+                                                        '執行加密，並記錄一筆歷版契約文件，並重劃表格 add by arwin 2018/08/24
+                                                        '紀錄發送final 信件Log
+                                   '發信通知主辦人，已提供最終版合約，並取消原來轉發 counterparty 信件
+                                   '後續轉用印時，相同的歷版契約紀錄要一起搬至用印表單
+                                   '一樣執行加密(人可能不同)，放置在原來的欄位上，不發信不記LOG
+                                   '執行換站
+                                                        
+                                                        
+                                                        'Set gfview = CMS_DB.GetView("MainFormalFlowNoAll")
+                                                        Set gfview = CMS_DB.GetView("MainFormalFlowNoAll_ALL") ' 2022/10 新舊案號皆需處理(審閱)
+                                                        Set gfdoc = gfview.GetDocumentByKey(tmpSubject)
+                                                        If Not gfdoc Is Nothing Then
+                                                                'Call NotifyLOFinalVer(gfdoc,maildoc)
+                                                                'Call NotifyCounterParty(maildoc,maildoc.Subject(0))
+                                                                '>>>>NEW 201808 新增歷版契約附件表格
+                                                                If Maildoc.CntractDocUID(0)="" Then '未建Contract Doc. 
+                                                                        
+                                                                        isNotify="Y"
+                                                                        
+                                                                        Set Cmsdoc=gfdoc
+                                                                        
+                                                                        Set approverNameItem = Cmsdoc.GetFirstItem("ApproverName")
+                                                                        Set approvalDateItem = Cmsdoc.GetFirstItem("ApprovalDate")
+                                                                        Set approvalCommentItem = Cmsdoc.GetFirstItem("ApprovalComment")
+                                                                        Set approverNameEngItem = Cmsdoc.GetFirstItem("ApproverNameEng")
+                                                                        Set approvalCommentEngItem = Cmsdoc.GetFirstItem("ApprovalCommentEng")
+                                                                        
+                                                                        Call approverNameItem.AppendToTextList(xInBoxKey)
+                                                                        Call approvalDateItem.AppendToTextList(Cstr(Cstr(Format(dummyDoc.Created , "yyyy/mm/dd hh:nn:ss"))))                                                                        
+                                                                        Call approverNameEngItem.AppendToTextList(xInBoxKey)
+                                                                        
+                                                                        '202011/05 identify mail form Log --------------------------Start 
+                                                               '標示該最終版為FV承辦法務所發送
+                                                                        Set mailName =New NotesName(tmpform)
+                                                                        If mailName.Common = "DeployAdmin" Then
+                                                                                
+                                                                                Set xName = New NotesName(Maildoc.ExecuteBy(0))
+                                                                                Call approvalCommentItem.AppendToTextList("同意簽出(by "+xInBoxKey+". by "+ xName.Common + " activate CV to FV)")
+                                                                                Call approvalCommentEngItem.AppendToTextList("Submit.(by "+xInBoxKey+". by "+ xName.Common + " activate CV to FV)")                                         
+                                                                        Else
+                                                                                Call approvalCommentItem.AppendToTextList("同意簽出(by "+xInBoxKey+". by "+ mailName.Common + ")")
+                                                                                Call approvalCommentEngItem.AppendToTextList("Submit.(by "+xInBoxKey+". by "+ mailName.Common + ")") 
+                                                                        End If
+                                                                   '202011/05 identify mail form Log --------------------------End
+                                                                        
+                                                                        
+                                                                        If (gfdoc.Form(0)="FormalForm" Or gfdoc.Form(0)="MainForm") And gfdoc.DocStatus(0)="Approved" Then
+                                                                                If gfdoc.CurrentState(0)=0 Or gfdoc.CurrentState(0)=1 Then
+                                                                                        gfdoc.PartyReview = ""
+                                                                                        gfdoc.CurrentState = 0
+                                                                                        gfdoc.LODueDate = ""
+                                                                                        gfdoc.DocStatus = "Approved"
+                                                                                        
+                                                                                        gfdoc.CurrentApprovalName = ""
+                                                                                        gfdoc.CurrentApprovalUserName = ""
+                                                                                        gfdoc.AllCurrentApprovalUserName = ""
+                                                                                        Set tCanonicalName = New NotesName(gfdoc.UserName(0))
+                                                                                        Set tItem = gfdoc.ReplaceItemValue("AllCurrentApprovalUserName" , tCanonicalName.Canonical)                
+                                                                                        
+                                                                                End If
+                                                                        End If
+                                                                End If
+                                                                
+                                                                Call ProcessAttachment(gfdoc,Maildoc)         '201808 新增歷版契約附件表格
+                                                                
+                                                                Set agent=CMS_DB.GetAgent("(agCreateContractVerList)")  
+                                                                If s.IsOnServer Then
+                                                                        Call agent.Run(gfdoc.Noteid)
+                                                                Else
+                                                                        Call agent.RunOnServer(gfdoc.Noteid)
+                                                                End If
+                                                                '<<<<NEW 201808 新增歷版契約附件表格
+                                                        Else
+                                                                'Call NotifyError(maildoc,"cmsgeneralfinal Mail Subject Error(連審閱也找不到)")
+                                                                Call NotifyDocNoNotExist(maildoc,tmpSubject +"- 案號不存在。")
+                                                        End If
+                                                        
+                                                        'Maildoc.CmsGcmsFinalFormalUpdateFlag="2"
+                                                        xitemProcFlag.Values="2"
+                                                        Call Maildoc.Save(True,True)
+                                                End If
+                                                
+                                                If isNotify="Y" Then
+                                                        If Left(Cmsdoc.ContractDept(0),2)="MJ" Then
+                                                                'blindCopyTo(4)="Sally Wang/TAIWAN/MXIC"
+                                                        End If
+                                                        
+                                                        Set memo=db.createdocument()
+                                                        memo.form = "Memo"
+%REM
+                                                        memo.SendTo = Cmsdoc.IPLUserName '201912 法務人員改多重值
+                                                        cc(0) = Cmsdoc.UserName(0)
+                                                        'cc(1) = Cmsdoc.IPLUserName(0)
+                                                        'cc(2) = systemprofile.IPLLeaderUserName(0)
+                                                        cc(1) = Cmsdoc.UserName1(0)
+                                                        cc(2) = Cmsdoc.UserName2(0)
+                                                        'cc(5) = Cmsdoc.UserName3(0)'for Req. HA201100027
+                                                        'cc(6) = systemprofile.LawyerEMail1(0)
+                                                        memo.CopyTo= cc                
+%END REM
+                                                        memo.BlindCopyTo=blindCopyTo
+                                                        memo.From="CMS系統通知"
+                                                        memo.Principal="CMS系統通知"
+                                                        memo.DisplaySent="CMS系統通知"
+                                                        Dim rtitem As New NotesRichTextItem(memo,"Body")
+                                                        memo.Subject = Maildoc.Subject(0)+"("+xInBoxNaDsp+"  系統通知)" '202305 新增信箱名稱
+                                                        If (Cmsdoc.tUserOU(0)<>"TAIWAN") Or (Cmsdoc.tUserOU1(0)<>"" And Cmsdoc.tUserOU1(0)<>"TAIWAN") Or (Cmsdoc.tUserOU2(0)<>"" And Cmsdoc.tUserOU2(0)<>"TAIWAN") Then
+                                                                xMailKey="A:FinalAgent^^E:Initialize^cmssfinal_CMS_ENG^1" 'Mail 改郵件通知設定        
+                                                        Else
+                                                                xMailKey="A:FinalAgent^^E:Initialize^cmssfinal_CMS_CHN^1" 'Mail 改郵件通知設定                                                                                  
+                                                        End If
+                                                        '>>>>>Mail 改郵件通知設定
+                                                        Cmsdoc.TmpChiefMgrUserName=getChiefMgrUserNameByDoc(Cmsdoc,"CMS") 
+                                                        Cmsdoc.TmpLegalLeader=xLegalLeader
+                                                        Set setupdoc=getMailSettingResultDbDoc(CMS_DB,Cmsdoc.ParentDatabase,Cmsdoc,xMailKey,"") 'Mail 改郵件通知設定
+                                                        Cmsdoc.RemoveItem("TmpChiefMgrUserName")
+                                                        Cmsdoc.RemoveItem("TmpLegalLeader")
+                                                        bodyStr=setupdoc.Resbody(0)
+                                                        memo.SendTo=setupdoc.ResSendTo
+                                                        memo.CopyTo=setupdoc.ResCopyTo
+                                                        Call rtitem.AppendText(bodyStr)
+                                                        '<<<<<Mail 改郵件通知設定
+                                                        
+                                                        Call rtitem.AddNewLine(2)
+                                                        Call rtitem.AppendText("CMS 申請單(Apply Form) ==> ")
+                                                        Call rtitem.AppendDocLink(Cmsdoc , "Connect to document")
+                                                        
+                                                        Call memo.send(False)         'according to Stacey's email 2011/08/04
+                                                End If
+                                                
+                                '        Elseif Ucase$(Left(Right(tmpSubject,4),1))="S" Or Ucase$(Right(Left(tmpSubject,4),1))="S" Or Ucase$(Left(Right(tmpSubject,4),1))="G"Or Ucase$(Right(Left(tmpSubject,4),1))="G" Or Ucase$(Right(Left(tmpSubject,4),1))="A" Or Ucase$(Right(Left(tmpSubject,4),1))="C" Or Ucase$(Right(Left(tmpSubject,4),1))="D" Or Ucase$(Left(Right(tmpSubject,4),1))="B" Or Ucase$(Left(Right(tmpSubject,4),1))="M" Or Ucase$(Right(Left(tmpSubject,5),2))="SG"Then 'Or Ucase$(Left(tmpSubject,1))="I" )Then        'Gcms Case
+                                        Elseif xFormType="GCMS" Then        
+                                                Set GCmsdoc=GCmsview.GetDocumentByKey(tmpSubject,True)        
+                                                Set systemprofile = GCMS_DB.GetProfileDocument("SystemProfile")
+                                                Set syssetupview=GCMS_DB.GetView("vSysSetupDoc")
+                                                Set syssetupdoc=syssetupview.GetDocumentByKey("$fSysDoc",True)
+                                                
+                                                'Path=|@ReplaceSubString("|+dbinfoProfile.GCMSPath(0)+|";"\\";"/")| '201911 for SCMS
+                                                'DbPath=Evaluate(path) '201911 for SCMS
+                                                Path=|@ReplaceSubString(GCMSDBFilePath;"\\";"/")| '201911 for SCMS
+                                                DbPath=Evaluate(path,cmsDBProfile)  '201911 for SCMS
+                                                If Not syssetupdoc Is Nothing Then
+                                                        xUrl=syssetupdoc.ExtInternetURL(0)
+                                                End If                                        
+                                                If Not GCmsdoc Is Nothing Then                
+%REM
+                                                        Set username=New NotesName(SystemProfile.ManagerUserName(0))
+                                                        gcmsdoc.CurFlowStepNo="0080"
+                                                        gcmsdoc.CurFlowStepName="契約管理員"
+                                                        gcmsdoc.CurFlowStepNameEng="Under Contract Management Clerk's Handling"
+                                                        gcmsdoc.CurFlowStepStatusName="契約管理員處理"
+                                                        gcmsdoc.CurApprover=username.Canonical
+                                                        gcmsdoc.CurApproverDeputy=Evaluate(|CurApprover+"^"|,gcmsdoc)
+                                                        gcmsdoc.CurApproveList=GetChiName(gcmsdoc,username.Abbreviated)+"("+username.Abbreviated+")"
+                                                        gcmsdoc.DocStatus = "Concluded" 
+                                                'gcmsdoc.CurrentState=0
+                                                        gcmsdoc.StepOwner_80=GetChiName(gcmsdoc,username.Abbreviated)+"("+username.Abbreviated+")"
+                                                        gcmsdoc.SignDocStatus = "Issued"
+                                                        gcmsdoc.ContractOriginal=0
+%END REM
+                                                        Set approverNameItem = gcmsdoc.GetFirstItem("ApproverName")
+                                                        Set approvalDateItem = gcmsdoc.GetFirstItem("ApprovalDate")
+                                                        Set approvalCommentItem = gcmsdoc.GetFirstItem("ApprovalComment")
+                                                        Set approverNameEngItem = gcmsdoc.GetFirstItem("ApproverNameEng")
+                                                        Set approvalCommentEngItem = gcmsdoc.GetFirstItem("ApprovalCommentEng")
+                                                        
+                                                        Call approverNameItem.AppendToTextList(xInBoxKey)
+                                                        Call approvalDateItem.AppendToTextList(Format(dummyDoc.Created , "yyyy/mm/dd hh:nn:ss"))        
+                                                        Call approverNameEngItem.AppendToTextList(xInBoxKey)
+                                                        
+                                                        '202011/05 identify mail form Log --------------------------Start 
+                                                     '標示該最終版為FV承辦法務所發送
+                                                        Set mailName =New NotesName(tmpform)
+                                                        If mailName.Common = "DeployAdmin" Then
+                                                                Set xName = New NotesName(Maildoc.ExecuteBy(0))
+                                                                Call approvalCommentItem.AppendToTextList("同意簽出(by "+xInBoxKey+". by "+ xName.Common + " activate CV to FV)")
+                                                                Call approvalCommentEngItem.AppendToTextList("Submit.(by "+xInBoxKey+". by "+ xName.Common + " activate CV to FV)")                                         
+                                                        Else
+                                                                Call approvalCommentItem.AppendToTextList("同意簽出(by "+xInBoxKey+". by "+ mailName.Common + ")")
+                                                                Call approvalCommentEngItem.AppendToTextList("Submit.(by "+xInBoxKey+". by "+ mailName.Common + ")") 
+                                                        End If
+                                                        '202011/05 identify mail form Log --------------------------End 
+                                                        
+                                                        If gcmsdoc.Form(0)="fMainFormG" And (gcmsdoc.WorkFlowName(0)="MainG" Or gcmsdoc.WorkFlowName(0)="FormalG") And gcmsdoc.DocStatus(0)="Approved" And  (gcmsdoc.CurFlowStepNo(0)="0030" Or gcmsdoc.CurFlowStepNo(0)="0040") Then
+                                                                Set curitem=gcmsdoc.GetFirstItem("CurApprover")
+                                                                Set curitemdeputy=gcmsdoc.GetFirstItem("CurApproverDeputy")
+                                                                Set curitemlist=gcmsdoc.GetFirstItem("CurApproveList")
+                                                                curitem.Values=""
+                                                                curitemdeputy.Values=""
+                                                                curitemlist.Values=""
+                                                                gcmsdoc.CurFlowStepNo="0040"
+                                                                gcmsdoc.CurFlowStepName="主辦人處理"
+                                                                gcmsdoc.CurFlowStepNameEng="Under Account Manager's Handling"
+                                                                gcmsdoc.CurFlowStepStatusName="主辦人處理"
+                                                                gcmsdoc.Type_40="Parallel"
+                                                                
+                                                        'If gcmsdoc.Subsidiary(0)="MXA" Or gcmsdoc.Subsidiary(0)="MXE" Or gcmsdoc.Subsidiary(0)="MXH" Then
+                                                                If gcmsdoc.Subsidiary(0)="MXA" Or gcmsdoc.Subsidiary(0)="MXE" Or gcmsdoc.Subsidiary(0)="MXH" Or gcmsdoc.Subsidiary(0)="MXS" Or gcmsdoc.Subsidiary(0)="MXJ" Or gcmsdoc.Subsidiary(0)="MXK" Then
+                                                                        Call curitem.AppendToTextList(gcmsdoc.SUserName(0))
+                                                                        Call curitem.AppendToTextList(gcmsdoc.CoUserName(0))
+                                                                        Call curitemdeputy.AppendToTextList(Evaluate(|CurApprover+"^"|,gcmsdocc)        )
+                'Call curitemdeputy.AppendToTextList(doc.CoUserName(0))
+                                                                        Call curitemlist.AppendToTextList(gcmsdoc.Subsidiary(0)+":"+gcmsdoc.SUserChiName(0)+"("+gcmsdoc.SUserName(0)+")")
+                                                                        Call curitemlist.AppendToTextList(gcmsdoc.Subsidiary(0)+":"+gcmsdoc.CoUserChiName(0)+"("+gcmsdoc.CoUserName(0)+")")
+                                                                Else
+                                                                        gcmsdoc.CurApprover=gcmsdoc.SUserName(0)
+                                                                        gcmsdoc.CurApproverDeputy=Evaluate(|CurApprover+"^"|,gcmsdoc)
+                                                                        gcmsdoc.CurApproveList=gcmsdoc.Subsidiary(0)+":"+gcmsdoc.SUserChiName(0)+"("+gcmsdoc.SUserName(0)+")"
+                                                                End If
+                                                                
+                                                                gcmsdoc.DocStatus = "Approved" 
+                                                                gcmsdoc.CurrentState=0
+                                                                gcmsdoc.LODueDate = ""
+                                                                gcmsdoc.PartyReview = ""
+                                                                
+                                                        End If
+                                                        
+                                                        url2=xUrl+"/"+DbPath(0)+"/0/"+GCmsdoc.Universalid+"?OpenDocument"                '文件連結
+                                                        
+                                                        Call ProcessAttachment1(GCmsdoc,Maildoc)                
+                                                        
+                                                        If gcmsdoc.Subsidiary(0)="MXA" Or gcmsdoc.Subsidiary(0)="MXE" Or gcmsdoc.Subsidiary(0)="MXH" Or gcmsdoc.Subsidiary(0)="MXK" Or gcmsdoc.Subsidiary(0)="MXS" Or gcmsdoc.Subsidiary(0)="MXJ" Then
+                                                                'blindCopyTo(4)="Sally Wang/TAIWAN/MXIC"
+                                                        End If
+                                                        
+                                                        Set memo=db.createdocument()
+                                                        memo.form = "Memo"        
+%REM
+                                                        memo.SendTo = gcmsdoc.IPLUserName '201912 法務人員改多重值
+                                                        cc(0) = gcmsdoc.SUserEMail(0)
+                                                        'cc(1) = gcmsdoc.IPLUserName(0)
+                                                        'cc(2) = systemprofile.IPLLeaderUserName(0)
+                                                        'cc(3) = gcmsdoc.SManagerEMail(0)
+                                                        'cc(4) = gcmsdoc.tSManagerEMail(0)
+                                                        cc(1)= gcmsdoc.CoUserEMail(0)
+                                                        cc(2)= gcmsdoc.CoUserEMail2(0)
+                                                        'cc(7)= gcmsdoc.SupervisorEMail(0)
+                                                        'cc(8) = systemprofile.LawyerEMail1(0)
+                                                        memo.CopyTo= cc                
+%END REM
+                                                        memo.BlindCopyTo=blindCopyTo
+                                                        memo.From="GCMS系統通知"
+                                                        memo.Principal="GCMS系統通知"
+                                                        memo.DisplaySent="GCMS系統通知"
+                                                        Dim rtitem2 As New NotesRichTextItem(memo,"Body")
+                                                        memo.Subject = Maildoc.Subject(0)+"("+xInBoxNaDsp+"  系統通知)" '202305 新增信箱名稱
+                                                        
+                                                        'If gcmsdoc.dispute(0)=0 Then
+                                                        'If gcmsdoc.WorkFlowName(0)="MainG" Then
+                                                        If (gcmsdoc.SLanType(0)<>"CHN") Or (gcmsdoc.CoLanType(0)<>"" And gcmsdoc.CoLanType(0)<>"CHN") Or (gcmsdoc.CoLanType2(0)<>"" And gcmsdoc.CoLanType2(0)<>"CHN") Then
+                                                                xMailKey="A:FinalAgent^^E:Initialize^cmssfinal_GCMS_ENG^1" 'Mail 改郵件通知設定
+                                                        Else
+                                                                xMailKey="A:FinalAgent^^E:Initialize^cmssfinal_GCMS_CHN^1" 'Mail 改郵件通知設定
+                                                        End If
+'                                                                
+                                                        '>>>>>Mail 改郵件通知設定
+                                                        gcmsdoc.TmpChiefMgrUserName=getChiefMgrUserNameByDoc(gcmsdoc,"GCMS") 
+                                                        gcmsdoc.TmpLegalLeader=xLegalLeader
+                                                        Set setupdoc=getMailSettingResultDbDoc(CMS_DB,gcmsdoc.ParentDatabase,gcmsdoc,xMailKey,"") 'Mail 改郵件通知設定
+                                                        gcmsdoc.RemoveItem("TmpChiefMgrUserName")
+                                                        gcmsdoc.RemoveItem("TmpLegalLeader")
+                                                        xbody=setupdoc.Resbody(0)
+                                                        memo.SendTo=setupdoc.ResSendTo
+                                                        memo.CopyTo=setupdoc.ResCopyTo
+                                                        '<<<<<Mail 改郵件通知設定
+                                                        
+                                                        
+                                                        Call rtitem2.AppendText(xbody)
+                                                        Call rtitem2.Addnewline(2)
+                                                        If (gcmsdoc.SLanType(0)<>"CHN") Or (gcmsdoc.CoLanType(0)<>"" And gcmsdoc.CoLanType(0)<>"CHN") Or (gcmsdoc.CoLanType2(0)<>"" And gcmsdoc.CoLanType2(0)<>"CHN") Then
+                                                                Call rtitem2.Appendtext("For MXIC Recipient: ")
+                                                        Else
+                                                                Call rtitem2.Appendtext("旺宏收件人請點選: ")
+                                                        End If                
+                                                        Call rtitem2.Appenddoclink(gcmsdoc,"Doc Link")
+                                                        Call rtitem2.Addnewline(2)
+                                                        If (gcmsdoc.SLanType(0)<>"CHN") Or (gcmsdoc.CoLanType(0)<>"" And gcmsdoc.CoLanType(0)<>"CHN") Or (gcmsdoc.CoLanType2(0)<>"" And gcmsdoc.CoLanType2(0)<>"CHN") Then
+                                                                Call rtitem2.Appendtext("For Macronix Group Companies Recipient: ")
+                                                        Else
+                                                                Call rtitem2.Appendtext("旺宏集團子公司收件人請點選下列網址: ")
+                                                        End If
+                                                        Call rtitem2.Addnewline(1)
+                                                        Call rtitem2.Appendtext(url2)
+                                                        Call rtitem2.Addnewline(2)
+                                                'End If
+                                                        Call memo.send(False)        'according to Stacey's email 2011/08/04
+                                                        
+                                                        Call gcmsdoc.Save(True,True)        
+                                                        Call FillContractFinalName(gcmsdoc)  ' add by arwin 2013/03/21
+                                                        Call FillAuthContractFinalName(gcmsdoc)  ' add by arwin 2017/06/26
+                                                        
+                                                        'If gcmsdoc.DocStatus(0)<>"Concluded"  And gcmsdoc.CurFlowStepNo(0)<>"0040" Then 'add by arwin 2015/08/03
+                                                        '        Call NotifyCounterParty(maildoc,maildoc.Subject(0))
+                                                        'End If
+                                                        
+                                                        '>>>>NEW 201808 新增歷版契約附件表格
+                                                        Set agent=GCMS_DB.GetAgent("(agCreateContractVerList)")  
+                                                        If s.IsOnServer Then
+                                                                Call agent.Run(gcmsdoc.Noteid)
+                                                        Else
+                                                                Call agent.RunOnServer(gcmsdoc.Noteid)
+                                                        End If
+                                                        '<<<<NEW 201808 新增歷版契約附件表格
+                                                        
+                                                Else 'No 找不到或有誤
+                                                        'Call NotifyError(maildoc,"cmsstandardfinal GCMS Apply No not found")
+                                                        Call NotifyDocNoNotExist(maildoc,tmpSubject +"- 案號不存在。")
+                                                End If
+                                        Else
+                                                'Call NotifyError(maildoc,"cmsstandardfinal Mail Subject Error")
+                                                Call NotifyDocNoNotExist(maildoc,tmpSubject +"- 案號不存在。")
+                                        End If
+                                Else  
+                                        If Ucase$(Left(tmpSubject,2))="SG" Or Ucase$(Left(tmpSubject,1))="G"  Or Ucase$(Left(tmpSubject,1))="S" Or Ucase$(Left(tmpSubject,1))="A" Or Ucase$(Left(tmpSubject,1))="C" Or Ucase$(Left(tmpSubject,1))="D" Or Ucase$(Left(tmpSubject,5))="MXICS" Or Ucase$(Left(tmpSubject,5))="MXICG" Or Ucase$(Left(tmpSubject,6))="MXICSG" Then
+                                                Set cNofiledoc=Cmsview.GetDocumentByKey(tmpSubject,True)        
+                                                If Not cNofiledoc Is Nothing Then
+                                                        Call NotifyLOFinalVer(cNofiledoc,maildoc)
+                                                Else
+                                                        Set gfview = CMS_DB.GetView("MainFormalFlowNoAll")
+                                                        Set cNofiledoc = gfview.GetDocumentByKey(tmpSubject)
+                                                        If Not cNofiledoc Is Nothing Then
+                                                                Call NotifyLOFinalVer(cNofiledoc,maildoc)        
+                                                        Else
+                                                                'Call NotifyError(maildoc,"cmsstandardfinal Mail Subject Error(連審閱也找不到且附加檔不存在)")
+                                                                Call NotifyDocNoNotExist(maildoc,tmpSubject +"- 案號不存在。")
+                                                        End If
+                                                End If
+                                        Elseif Ucase$(Left(Right(tmpSubject,4),1))="G" Or Ucase$(Right(Left(tmpSubject,4),1))="G" Or Ucase$(Left(Right(tmpSubject,4),1))="S" Or Ucase$(Right(Left(tmpSubject,4),1))="S" Or Ucase$(Right(Left(tmpSubject,4),1))="D" Or Ucase$(Right(Left(tmpSubject,4),1))="A" Or Ucase$(Right(Left(tmpSubject,4),1))="C" Or Ucase$(Right(Left(tmpSubject,5),2))="SG"Then 
+                                                Set gNofiledoc=GCmsview.GetDocumentByKey(tmpSubject,True)        
+                                                If Not gNofiledoc Is Nothing Then
+                                                        Call NotifyLOFinalVer(gNofiledoc,maildoc)
+                                                Else
+                                                        'Call NotifyError(maildoc,"cmsstandardfinal GCMS Apply No not found(附加檔不存在)")        
+                                                        Call NotifyDocNoNotExist(maildoc,tmpSubject +"- 案號不存在。")
+                                                End If        
+                                        Else
+                                                Call NotifyDocNoNotExist(maildoc,tmpSubject +"- 案號不存在。")
+                                        End If                
+                                        'Call NotifyError(maildoc,"cmsstandardfinal 附加檔不存在 Error")
+                                End If
+                        Else
+                                'If tmpform= "Stacey.Lee@bakermckenzie.com" Or tmpform="CN=TC Chiao/OU=TAIWAN/O=MXIC"Then
+                                '        Call NotifyError1(maildoc,"cmsstandardfinal Error - 系統偵測不到附加檔案")
+                                'End If
+                                Call NotifyError(maildoc,""+xInBoxKey+" 寄件人 Error :"+ tmpform + " "+tmpSubject)
+                                
+                        End If
+                        
+                        If xitemProcFlag.Values(0)<>"2" Then
+                                xitemProcFlag.Values="1"
+                                Call Maildoc.Save(True,True)
+                        End If
+                        '>>>>>202101 CMS Final 解決頓號程式
+                        If isMutiCase="Y"Then 
+                                '執行外掛程式
+                                Set MutiCaseProcessDoc=CMS_DB.CreateDocument
+                                MutiCaseProcessDoc.Form="MutiCaseProcessDoc"
+                                MutiCaseProcessDoc.InBoxNa=xInBoxKey '**************
+                                MutiCaseProcessDoc.mailDBServer=mailDB.Server
+                                MutiCaseProcessDoc.mailDBPath=mailDB.FilePath
+                                MutiCaseProcessDoc.mailDocUNID=Maildoc.UniversalID
+                                'MutiCaseProcessDoc.ApprovalDate=Format(dummyDoc.Created , "yyyy/mm/dd hh:nn:ss")
+                                Call MutiCaseProcessDoc.Save(True,False)
+                                If s.IsOnServer Then
+                                        Call MutiCaseProcessAgent.Run(MutiCaseProcessDoc.Noteid)
+                                Else
+                                        Call MutiCaseProcessAgent.RunOnServer(MutiCaseProcessDoc.Noteid)
+                                End If
+                        End If
+                        '<<<<<202101
+                Else    '沒有Mail 主旨
+                        If xitemProcFlag.Values(0)<>"2" Then
+                                xitemProcFlag.Values="1"
+                                Call Maildoc.Save(True,True)
+                        End If
+                End If
+                
+                Set Maildoc=nextMailDoc
+        Wend
+        
+        Exit Sub        
+        
+err_handle:
+        Dim errSession As New NotesSession
+        Dim errDB As NotesDatabase
+        Set errDB=errSession.CurrentDatabase
+        
+        Dim errMailForm As New NotesDocument(errDB)        
+        Dim errLink_doc As New NotesRichTextItem(errMailForm , "Body")
+        errMailForm.Form = "Memo"
+        errMailForm.SendTo = "Yorkhsu Lin/TAIWAN/MXIC"
+        errMailForm.CopyTo = "Arwin Chang/TAIWAN/MXIC"
+        errMailForm.Subject = "("+xInBoxKey+")CmsGcmsFinalFormalAgentByMailDb Error"
+        Call errLink_doc.AppendText("錯誤訊息："+Error$)
+        Call errLink_doc.AddNewline(2)
+        Call errLink_doc.AppendText("錯誤行數："+ Cstr(Erl))
+        Call errLink_doc.AddNewline(2)
+        
+        Call errMailForm.Send(False)
+        Exit Sub
+End Sub
+Sub CreateMonitorForm(contractDoc As NotesDocument,doc As NotesDocument,xContractDBName As String)
+        Dim s As New NotesSession
+        Dim db As NotesDatabase        
+        Set db = s.CurrentDatabase
+        Dim newdoc As NotesDocument
+        Set newdoc=New NotesDocument(MonitorForm_DB)        
+        newdoc.Form="MonitorForm"        
+        newdoc.ContractFormUNID=contractDoc.UniversalID
+        newdoc.ContractMainUNID=doc.UniversalID
+        newdoc.ContractDBServer=doc.ParentDatabase.Server
+        newdoc.ContractDBPath=doc.ParentDatabase.FilePath
+        If xContractDBName="" Then
+                xChkVal=doc.ParentDatabase.FilePath
+                If xChkVal=CMS_DB.FilePath Then
+                        xContractDBName="CMS"
+                Elseif xChkVal=GCMS_DB.FilePath Then
+                        xContractDBName="GCMS"
+                Elseif xChkVal=SCMS_DB.FilePath Then
+                        xContractDBName="SCMS"
+                End If
+        End If        
+        newdoc.ContractDBName=xContractDBName
+        newdoc.CreatedBy=mailDB.Title '區分Final 信箱
+        newdoc.FlowNumber=doc.FlowNumber
+        newdoc.Status="Open"
+        Call newdoc.Save(True , True)        
+End Sub
+
+
+Sub ProcessAttachment1(doc As NotesDocument,tdoc As NotesDocument)
+        On Error Goto err_handle         
+        '判斷是否有新插入之合約檔案
+        Dim contractObjectCount As Integer
+        
+        Set sourceObject = tdoc.GetFirstItem("Body")        
+        
+        contractObjectCount = 0
+        If Not ( sourceObject Is Nothing ) Then
+                If Not ( Isempty(sourceObject.EmbeddedObjects) ) Then
+                        Forall contract In sourceObject.EmbeddedObjects
+                                contractObjectCount = contractObjectCount + 1
+                        End Forall                                        
+                End If                                        
+        End If
+        
+        Select Case contractObjectCount
+        Case 0 : '沒有新插入之合約檔案
+                Call CreateNewContract1(doc,tdoc,0 , sourceObject , 1) '201911 for 取消判斷附件
+        Case Else : Call CreateNewContract1(doc,tdoc,1 , sourceObject , 1) '有新插入合約檔案
+        End Select
+        
+        Call doc.Save(True , True)
+        Exit Sub        
+        
+err_handle:
+        Dim errSession As New NotesSession
+        Dim errDB As NotesDatabase
+        Set errDB=errSession.CurrentDatabase
+        
+        Dim errMailForm As New NotesDocument(errDB)        
+        Dim errLink_doc As New NotesRichTextItem(errMailForm , "Body")
+        errMailForm.Form = "Memo"
+        errMailForm.SendTo = "Yorkhsu Lin/TAIWAN/MXIC"
+        errMailForm.CopyTo = "Arwin Chang/TAIWAN/MXIC"
+        errMailForm.Subject = "("+xInBoxKey+")CmsGcmsFinalFormalAgentByMailDb \ ProcessAttachment1 Error"
+        Call errLink_doc.AppendText("錯誤訊息："+Error$)
+        Call errLink_doc.AddNewline(2)
+        Call errLink_doc.AppendText("錯誤行數："+ Cstr(Erl))
+        Call errLink_doc.AddNewline(2)
+        
+        Call errMailForm.Send(False)
+        Exit Sub
+End Sub
+Function NotifyError(doc As NotesDocument,subject As String ) As Integer
+        Dim s As New NotesSession
+        Dim db As NotesDatabase
+        On Error Goto Errh
+        Dim maildoc As NotesDocument
+        Dim systemprofile As NotesDocument
+        Dim xsbj As String, xbody As String
+        Dim rt As NotesRichTextItem
+        Dim xview As NotesView
+        Dim dc As NotesDocumentCollection
+        Dim xdoc As NotesDocument, fdoc As NotesDocument
+        Dim tmpfrom As String
+        Dim count As Integer
+        count = 0        
+        Redim Preserve sendto(count) As String
+        sendto(count) = "Elaine Liang/TAIWAN/MXIC"
+        count = count+1
+        If Instr(subject,":")<> 0 Then
+                tmpfrom=Trim(Strright(subject,":"))
+        End If
+        xsbj=subject
+        xbody=xInBoxKey+" Error"        
+        Set maildoc=doc.ParentDatabase.CreateDocument
+        maildoc.sendto=sendto        
+        maildoc.CopyTo="Yorkhsu Lin/TAIWAN/MXIC"
+        maildoc.BlindCopyTo="Arwin Chang/TAIWAN/MXIC"
+        maildoc.principal = xInBoxKey        
+        maildoc.DisplaySent = xInBoxKey        
+        maildoc.Importance = "3"
+        maildoc.Subject = xsbj
+        maildoc.form="Memo"
+        maildoc.PostedDate=Now
+        maildoc.From=""                        
+        'maildoc.ReplyTo=Leftback(Rightback(Cdoc.txtMgrInfo(0), "("), ")")                        '--系統管理者
+        Set rt = maildoc.CreateRichTextItem("Body")
+        rt.AppendText(xbody)
+        rt.Addnewline(1)
+        rt.Addnewline(1)
+        Call rt.Appendtext("Mail Doc UNID- ->"+doc.UniversalID)
+        rt.Addnewline(1)
+        rt.Addnewline(1)
+        If tmpfrom="CN=DeployAdmin/OU=TAIWAN/O=MXIC" And doc.ExecuteBy(0) = "" Then
+                Call rt.Appendtext(xInBoxKey+" 為DeployAdmin發送，但未對應到CV人員，請確認")
+                rt.Addnewline(1)
+                rt.Addnewline(1)
+        End If        
+        Call rt.Appendtext("Mail Link- ->")
+        Call rt.Appenddoclink(doc,"Doc Link")
+        rt.Addnewline(1)
+        If maildoc.sendto(0)<>"" Then
+                Call maildoc.Send(False)
+        End If
+        
+        Exit Function
+Errh:
+        Dim errSession As New NotesSession
+        Dim errDB As NotesDatabase
+        Set errDB=errSession.CurrentDatabase
+        
+        Dim errMailForm As New NotesDocument(errDB)        
+        Dim errLink_doc As New NotesRichTextItem(errMailForm , "Body")
+        errMailForm.Form = "Memo"
+        errMailForm.SendTo = "Yorkhsu Lin/TAIWAN/MXIC"
+        errMailForm.CopyTo = "Arwin Chang/TAIWAN/MXIC"
+        errMailForm.Subject = "("+xInBoxKey+")CmsGcmsFinalFormalAgentByMailDb \ NotifyError Error"        
+        Call errLink_doc.AppendText("錯誤訊息："+Error$)
+        Call errLink_doc.AddNewline(2)
+        Call errLink_doc.AppendText("錯誤行數："+ Cstr(Erl))
+        Call errMailForm.Send(True)
+        Delete errMailForm
+        Resume Next
+        Exit Function
+End Function
+Function NotifyDocNoNotExist(doc As NotesDocument,subject As String ) As Integer
+        Dim s As New NotesSession
+        Dim db As NotesDatabase
+        On Error Goto Errh
+        Dim maildoc As NotesDocument
+        Dim systemprofile As NotesDocument
+        Dim xsbj As String, xbody As String
+        Dim rt As NotesRichTextItem
+        Dim xview As NotesView
+        Dim dc As NotesDocumentCollection
+        Dim xdoc As NotesDocument, fdoc As NotesDocument
+        Dim dbinfoProfile As NotesDocument        
+        Set db = s.CurrentDatabase
+        Set dbinfoProfile=mailDB.GetProfileDocument("DBInfo Profile")
+        
+        xsbj=subject
+        Set maildoc=doc.ParentDatabase.CreateDocument
+        maildoc.sendto= dbinfoProfile.NotifyPeople
+        maildoc.BlindCopyTo="Elaine Liang/TAIWAN/MXIC"
+        
+        'maildoc.CopyTo=dbinfoProfile.NotifyPeople
+        maildoc.principal = xInBoxKey        
+        maildoc.DisplaySent = xInBoxKey        
+        maildoc.Importance = "3"
+        maildoc.Subject = xsbj
+        maildoc.form="Memo"
+        maildoc.PostedDate=Now
+        maildoc.From=""                        
+        'maildoc.ReplyTo=Leftback(Rightback(Cdoc.txtMgrInfo(0), "("), ")")                        '--系統管理者
+        Set rt = maildoc.CreateRichTextItem("Body")
+        rt.AppendText("Dear Sir,")
+        rt.Addnewline(1)
+        rt.Addnewline(1)
+        rt.AppendText("寄發"+xInBoxKey+"信箱，案號不存在通知。")
+        rt.Addnewline(2)
+        Call rt.Appendtext("Mail Link- ->")
+        Call rt.Appenddoclink(doc,"Doc Link")
+        rt.Addnewline(1)
+        If maildoc.sendto(0)<>"" Then
+                Call maildoc.Send(False)
+        End If
+        
+        Exit Function
+Errh:
+        Dim errSession As New NotesSession
+        Dim errDB As NotesDatabase
+        Set errDB=errSession.CurrentDatabase
+        
+        Dim errMailForm As New NotesDocument(errDB)        
+        Dim errLink_doc As New NotesRichTextItem(errMailForm , "Body")
+        errMailForm.Form = "Memo"
+        errMailForm.SendTo = "Yorkhsu Lin/TAIWAN/MXIC"
+        errMailForm.CopyTo = "Arwin Chang/TAIWAN/MXIC"
+        errMailForm.Subject = "("+xInBoxKey+")CmsGcmsFinalFormalAgentByMailDb \ NotifyDocNoNotExist Error"
+        Call errLink_doc.AppendText("錯誤訊息："+Error$)
+        Call errLink_doc.AddNewline(2)
+        Call errLink_doc.AppendText("錯誤行數："+ Cstr(Erl))
+        Call errMailForm.Send(True)
+        Delete errMailForm
+        Resume Next
+        Exit Function
+End Function
+Function getSubjectFormTypeV0(tmpSubject As String) As String
+        getSubjectFormTypeV0=""
+        
+        '202411============
+        Dim systemProfile As NotesDocument
+        Dim caseTypeSettingList As Variant
+        Set systemProfile = CMS_DB.GetProfileDocument("SystemProfile")
+        '排除 M Type 避免與 GCMS 判斷造成衝突
+        caseTypeSettingList = Evaluate(|@Trim(@Replace(@Trim(@Word(ContractResource1;":";1));"M";"")) |,systemProfile)
+        '==================
+        
+        ' 202403 CMS & GCMS add B、M Type                 
+        Dim isCMSMType As String
+        isCMSMType="N"
+        If Ucase$(Left(tmpSubject,1))="M" Then        ' CMS M Type 與GCMS 開頭相同
+                If Ucase$(Left(tmpSubject,4))<>"MXIC" And Ucase$(Left(tmpSubject,2))<>"MX" And Ucase$(Left(tmpSubject,3))<>"MTR" Then
+                        isCMSMType="Y"
+                End If
+        End If
+        
+        'Legal System Phase 19:202510 信箱判斷案號系統名稱
+        Dim isSCMSMType As String
+        Dim xNumberHeader As String
+        Dim xitemTypeList As NotesItem
+        xNumberHeader=UCase(getFlowNumberHeader(tmpSubject))
+        isSCMSMType="N"                
+        
+        xLen=Len(xNumberHeader)
+        If xLen>1 Then
+                If Right(xNumberHeader,1)="S" Then
+                        xNumberHeaderKey=Left(xNumberHeader,xLen-1)
+                        Set xitemTypeList=systemProfile.Getfirstitem("BuTriggerTypeList")                        
+                        If xitemTypeList.Contains(xNumberHeaderKey) Then
+                                isSCMSMType="Y"
+                        End If
+                End If
+        End If
+        
+        If tmpSubject ="T25ADE0001" Then
+                isSCMSMType="Y"
+        End If
+        
+        'If Ucase$(Left(tmpSubject,2))="SS" Or Ucase$(Right(Left(tmpSubject,5),2))="SS" Then
+        If isSCMSMType="Y" Then '202510
+                getSubjectFormTypeV0="SCMS"
+                
+        Elseif Ucase$(Left(tmpSubject,1))="S" Or Ucase$(Left(tmpSubject,1))="D" Or Ucase$(Left(tmpSubject,1))="A" Or Ucase$(Left(tmpSubject,1))="C" Or Ucase$(Left(tmpSubject,1))="G" Or Ucase$(Left(tmpSubject,2))="SG" Or Ucase$(Left(tmpSubject,5))="MXICS" Or Ucase$(Left(tmpSubject,6))="MXICSG" Or Ucase$(Left(tmpSubject,5))="MXICG" Then 
+                getSubjectFormTypeV0="CMS"
+                
+        ' 202403 CMS add B、M Type 
+        'Elseif isCMSMType="Y" Or Ucase$(Left(tmpSubject,1))="B" Then
+        '202411============
+        Elseif isCMSMType="Y" Or IsMember(Ucase$(Left(tmpSubject,1)),caseTypeSettingList) Then        
+                getSubjectFormTypeV0="CMS"                        
+                
+                
+        Elseif (Ucase$(Left(tmpSubject,1))="M" Or Ucase$(Left(tmpSubject,1))="I" )Then        'Gcms Case
+                getSubjectFormTypeV0="GCMS"                
+        End If
+        
+End Function
+Function NotifyLOFinalVer(cdoc As NotesDocument,mdoc As NotesDocument) As Integer
+        Dim s As New NotesSession
+        Dim db As NotesDatabase
+        On Error Goto Errh
+        Dim maildoc As NotesDocument
+        Dim systemprofile As NotesDocument
+        Dim Style As NotesRichTextStyle, reStyle As NotesRichTextStyle
+        Dim xsbj As String, xbody As String
+        Dim rt As NotesRichTextItem
+        Dim mrt As Variant
+        Dim xview As NotesView
+        Dim dc As NotesDocumentCollection
+        Dim xdoc As NotesDocument, fdoc As NotesDocument
+        Dim count As Integer
+        Dim item As NotesItem
+        
+        xsbj=mdoc.Subject(0)
+        
+        Set maildoc=mdoc.ParentDatabase.CreateDocument
+        maildoc.sendto=cdoc.IPLUserName '201912 法務人員改多重值
+        'maildoc.copyto=copyto
+        
+        maildoc.principal = xInBoxKey        
+        maildoc.DisplaySent = xInBoxKey        
+        maildoc.Importance = "3"
+        maildoc.Subject = xsbj
+        maildoc.form="Memo"
+        Set item=maildoc.GetFirstItem("$KeepPrivate")
+        If Not maildoc.HasItem("$KeepPrivate") Then
+                Set item=New NotesItem(maildoc,"$KeepPrivate","")
+        End If
+        item.Values="1"
+        maildoc.PostedDate=Now
+        maildoc.From=""                        
+        'maildoc.ReplyTo=Leftback(Rightback(Cdoc.txtMgrInfo(0), "("), ")")                        '--系統管理者
+        Set rt = maildoc.CreateRichTextItem("Body")
+        Set mrt = mdoc.GetFirstItem("Body")
+        
+        Call rt.AppendRTItem(mrt)
+        rt.Addnewline(1)
+        rt.Addnewline(1)
+        If maildoc.sendto(0)<>"" Then
+                Call maildoc.Send(False)
+        End If
+        
+        Exit Function
+Errh:
+        Dim errSession As New NotesSession
+        Dim errDB As NotesDatabase
+        Set errDB=errSession.CurrentDatabase
+        
+        Dim errMailForm As New NotesDocument(errDB)        
+        Dim errLink_doc As New NotesRichTextItem(errMailForm , "Body")
+        errMailForm.Form = "Memo"
+        errMailForm.SendTo = "Arwin Chang/TAIWAN/MXIC"
+        errMailForm.Subject = "("+xInBoxKey+")CmsGcmsFinalFormalAgentByMailDb \ NotifyLOFinalVer Error"        
+        Call errLink_doc.AppendText("錯誤訊息："+Error$)
+        Call errLink_doc.AddNewline(2)
+        Call errLink_doc.AppendText("錯誤行數："+ Cstr(Erl))
+        Call errMailForm.Send(True)
+        Delete errMailForm
+        Resume Next
+        Exit Function
+End Function
+Function GetGPetitionInsideMgrList(subsidiary As String) As Variant
+'取得G Petition 匯入 CMS Peition 時的簽核主管清單
+        GetGPetitionInsideMgrList = Split("")
+        Dim importDeptNo As String
+        Dim session As New NotesSession 
+        Dim db As NotesDatabase
+        Dim DBProfile As NotesDocument
+        Dim CMSPetition_DB As NotesDatabase
+        Dim agent As NotesAgent
+        Dim ParamDoc As NotesDocument
+        
+        Set db = session.CurrentDatabase
+        Dim CMS_DB As NotesDatabase
+        Set DBProfile = db.Getprofiledocument("DBInfo Profile")
+        Set CMS_DB = session.Getdatabase(DBProfile.CMSServer(0), DBProfile.CMSFilePath(0))
+        Set db = CMS_DB
+        
+        Set DBProfile = db.GetProfileDocument("DBInfoProfile")
+        Set CMSPetition_DB = session.GetDatabase(DBProfile.CmspetitionServer(0) ,DBProfile.CmspetitionFilePath(0))
+        
+        
+        '建立參數文件
+        Set ParamDoc = CMSPetition_DB.CreateDocument()        
+        If subsidiary = "MXA"  Or subsidiary = "MXK" Or subsidiary = "MXE" Or subsidiary = "MXS" Then                                
+                importDeptNo = "MJ300"
+        Elseif subsidiary = "MXJ" Then
+                importDeptNo = "MJ400"                                                        
+        Elseif subsidiary = "MXH" Then
+                'H0202600003 部門改組
+                'importDeptNo = "MJB00"
+                importDeptNo = "MJ900"                
+        Elseif subsidiary = "MXC" Then
+                importDeptNo = "K0400"                
+        End If
+        
+        '呼叫Agent 取得主管清單
+        Dim xNotesID As String
+        Set agent = CMSPetition_DB.GetAgent("(agGetGPetitionInsideMgrList)")
+        ParamDoc.importDeptNo = importDeptNo                
+        Call ParamDoc.Save(True,False)
+        xNotesID = ParamDoc.NoteID
+        
+        If session.IsOnServer Then
+                Call agent.Run(ParamDoc.NoteID)
+        Else
+                Call agent.RunOnServer(ParamDoc.NoteID)                
+        End If
+        Set ParamDoc = Nothing
+        Set ParamDoc = CMSPetition_DB.GetDocumentByID(xNotesID)
+        
+        GetGPetitionInsideMgrList = ParamDoc.MgrList
+        
+        Exit Function
+        
+        
+End Function
+Sub CreateNewContract1(doc As NotesDocument,tdoc As NotesDocument,hasContractFile As Integer , sourceObject As Variant , sourceObjectType As Integer)
+        On Error Goto err_handle         
+     'hasContractFile : 1 ==> has Contract File          0 ==> no Contract File
+        'sourceObjectType : 1 ==> Attahment          0 ==> "---N/A---"
+        '>>>>NEW 201808 新增歷版契約附件表格
+        'xSrcType="cmsfinal"  '來源信箱
+        'TempDir = Environ("Temp")+"\"        
+        TempDir = "E:\APTemp\"
+        'TempDir = "c:\temp\NotesAPTemp"+"\" '
+        '<<<<NEW 201808 新增歷版契約附件表格
+        Dim contractDoc As NotesDocument
+        Dim s As New NotesSession
+        Dim db As NotesDatabase        
+        Set db = s.CurrentDatabase
+        'Dim dbinfoProfile As NotesDocument '201911 for 取消判斷附件
+        Dim targetObject As NotesRichTextItem
+        Dim printtargetObject As NotesRichTextItem        
+        
+        Dim tmpflag As String
+        tmpflag=""
+        '>>>>>201911 for 取消判斷附件
+        'Set dbinfoProfile=db.GetProfileDocument("DBInfo Profile")  '201911 for 取消判斷附件
+        'Dim GCMS_DB As New NotesDatabase(dbinfoProfile.GCMSServer(0),dbinfoProfile.GCMSPath(0))  '201911 for 取消判斷附件
+        'Dim GPetition_DB As New NotesDatabase(dbinfoProfile.GLMSPetitionServer(0),dbinfoProfile.GLMSPetitionPath(0))  '201911 for 取消判斷附件        
+        Set contractDoc = New NotesDocument(GCMS_DB)
+        Call contractDoc.MakeResponse(doc)
+        contractDoc.Form = "ContractForm"
+        contractDoc.CreatedBy = xSrcType
+        contractDoc.CreatedByUserName = xSrcType
+        contractDoc.ContractName = doc.ContractName(0)
+        contractDoc.ContractEdition = doc.ContractEdition(0)
+        'Mail Body Append 到ContractForm
+        Dim ContractObject As New NotesRichTextItem(contractDoc , "Body")
+        Dim rtitem As NotesRichTextItem
+        Set rtitem = tdoc.GetFirstItem("Body" )
+        If Not ( rtitem Is Nothing ) Then
+                If ( rtitem.Type = RICHTEXT ) Then
+                        Call ContractObject.AppendRTItem( rtitem )
+                End If
+        End If
+        '202204 強化ContractForm 關聯性 --- Start
+        contractDoc.MailUNID = tDoc.UniversalID '信件UNID
+        contractDoc.FlowNumber = doc.FlowNumber '所屬案件編號
+        '202204 強化ContractForm 關聯性 --- End
+        Call contractDoc.Save(True , False)
+        Call CreateMonitorForm(contractDoc,doc,"GCMS") '202110 MonitorForm        
+        
+        '移除原附件
+        Dim isChg As String
+        isChg="N"
+        Set rtitem = contractDoc.GetFirstItem("Body")        
+        If Not (rtitem Is Nothing ) Then
+                If Not ( Isempty(rtitem.EmbeddedObjects) ) Then
+                        Forall o In rtitem.EmbeddedObjects
+                                If (o.Type = EMBED_ATTACHMENT) Then
+                                        Call o.Remove
+                                        isChg="Y"
+                                End If
+                        End Forall
+                End If
+        End If
+        'If isChg="Y" Then
+        Call contractDoc.ComputeWithForm(True,False)
+        Call contractDoc.Save(True , True)
+        'End If
+        '<<<<<201911 for 取消判斷附件
+        
+        Dim settingView As NotesView
+        Dim settingProfile As NotesDocument
+        
+        Set settingView=GPetition_DB.GetView("vSysSetupDoc")
+        Set settingProfile=settingView.GetDocumentByKey("$fSysDoc",True)
+        Dim contract As Integer
+        If Not ( sourceObject Is Nothing ) Then
+                If ( sourceObject.Type = RICHTEXT ) Then
+                        If Not ( Isempty(sourceObject.EmbeddedObjects)) Then
+                                Set targetObject=doc.GetFirstItem("FinalContractFile")
+                                If targetObject Is Nothing Then
+                                        Set targetObject =  New NotesRichTextItem(doc , "FinalContractFile")
+                                End If
+                                Set printtargetObject=doc.GetFirstItem("FinalContractFile_Auth")
+                                If printtargetObject Is Nothing Then
+                                        Set printtargetObject =  New NotesRichTextItem(doc , "FinalContractFile_Auth")
+                                End If
+                                Dim filename As String
+                                If ( sourceObject.Type = RICHTEXT ) Then
+                                        If Not ( Isempty(sourceObject.EmbeddedObjects) ) Then        
+                                                
+                                                '>>>>>201911 for 取消判斷附件 建立ContractForm改在上方
+                                                '>>>>NEW 201808 新增歷版契約附件表格
+                                                'Set contractDoc = New NotesDocument(GCMS_DB)
+                                                'Call contractDoc.MakeResponse(doc)
+                                                'contractDoc.Form = "ContractForm"
+                                                'contractDoc.CreatedBy = xSrcType
+                                                'contractDoc.CreatedByUserName = xSrcType
+                                                'contractDoc.ContractName = doc.ContractName(0)
+                                                'contractDoc.ContractEdition = doc.ContractEdition(0)
+                                                'Call contractDoc.Save(True , False)
+                                                '<<<<NEW 201808 新增歷版契約附件表格
+                                                '<<<<201911 for 取消判斷附件
+                                                
+                                                For contract=0 To  Ubound(sourceObject.EmbeddedObjects)
+                                                        filename=""
+                                                        'filename = sourceObject.EmbeddedObjects(contract).Name
+                                                        filename = sourceObject.EmbeddedObjects(contract).Source 'Fix Notes 自動處理檔名 issue
+                                                        'Call sourceObject.EmbeddedObjects(contract).ExtractFile("c:\temp\NotesAPTemp"+"\"+filename)        
+                                                        Call sourceObject.EmbeddedObjects(contract).ExtractFile(TempDir+filename)
+                                                        If CheckFileName(filename)="Success" Then
+                                                                If doc.Subsidiary(0)="MXA"  Or doc.Subsidiary(0)="MXC" Or doc.Subsidiary(0)="MXE" Or doc.Subsidiary(0)="MXH" Or doc.Subsidiary(0)="MXK" Or doc.Subsidiary(0)="MXS" Or doc.Subsidiary(0)="MXJ" Then
+                                                                        Dim readerIndex As Integer
+                                                                        readerIndex=10
+                                                                        Redim readerList(readerIndex) As String
+                                                                        
+                                                                '>>>>>201912 Final 新增權限InfiledLawyer
+                                                                        If Instr(doc.InfiledLawyer(0),"/MXIC")<> 0 Then
+                                                                                readerIndex=readerIndex+1
+                                                                                Redim Preserve readerList(readerIndex) 
+                                                                                readerList(readerIndex) =doc.InfiledLawyer(0)
+                                                                                readerIndex=readerIndex+1
+                                                                        End If
+                                                                '<<<<<201912 Final 新增權限InfiledLawyer
+                                                                        
+                                                                '>>>202109 新增FV 法務權限
+                                                                        readerIndex=readerIndex+1
+                                                                        Redim Preserve readerList(readerIndex) 
+                                                                        readerList(readerIndex) =doc.FVIPLUserName(0)
+                                                                        readerIndex=readerIndex+1
+                                                                '<<<202109 新增FV 法務權限
+                                                                        
+                                                                '>>>202504 TrustView 加密專案: 新增G Petition 轉入內站主管名單
+                                                                        readerIndex=readerIndex+1
+                                                                        Dim GPetitionInsideMgrs As Variant
+                                                                        GPetitionInsideMgrs = GetGPetitionInsideMgrList(doc.Subsidiary(0))
+                                                                        If GPetitionInsideMgrs(0) <> "" Then
+                                                                                For i = 0 To Ubound(GPetitionInsideMgrs)
+                                                                                        readerIndex=readerIndex+1
+                                                                                        Redim Preserve readerList(readerIndex) 
+                                                                                        readerList(readerIndex) = GPetitionInsideMgrs(i)
+                                                                                Next
+                                                                        End If
+                                                                        readerIndex=readerIndex+1
+                                                                '>>>202504 TrustView 加密專案: 新增G Petition 轉入內站主管名單
+                                                                        
+                                                                        If Left(doc.SUserName(0),2)="MX" Then
+                                                                        Else
+                                                                                readerList(0) =doc.SUserName(0)+"/"
+                                                                        End If
+                                                                        
+                                                                        If doc.CoUserName(0)<>"" Then
+                                                                                If Left(doc.CoUserName(0),2)="MX" Then
+                                                                                Else
+                                                                                        readerList(1) =doc.CoUserName(0)+"/"
+                                                                                End If
+                                                                        End If
+                                                                        If doc.CoUserName2(0)<>"" Then
+                                                                                If Left(doc.CoUserName2(0),2)="MX" Then
+                                                                                Else
+                                                                                        readerList(2) =doc.CoUserName2(0)+"/"
+                                                                                End If
+                                                                        End If
+                                                                        
+                                                                        If Isarray(doc.IPLUserName) Then
+                                                                                For i=0 To Ubound(doc.IPLUserName)
+                                                                                        Redim Preserve readerList(readerIndex+i+1) As String
+                                                                                        readerList(readerIndex+i+1)=doc.IPLUserName(i)
+                                                                                Next
+                                                                        Else
+                                                                                readerList(3) =doc.IPLUserName(0)
+                                                                        End If
+                                                                        
+                                                                        readerList(4) ="Stacey Lee/TAIWAN/MXIC"
+                                                                        If doc.Subsidiary(0)="MXA" Or doc.Subsidiary(0)="MXE" Or doc.Subsidiary(0)="MXH" Or doc.Subsidiary(0)="MXK" Or doc.Subsidiary(0)="MXS" Or doc.Subsidiary(0)="MXJ" Then
+                                                                        'readerList(5) ="Sally Wang/TAIWAN/MXIC"
+                                                                                readerList(10) ="JT Chung/TAIWAN/MXIC"
+                                                                        End If
+                                                                        
+                                                                        If doc.SupervisorUserName(0)<>"" Then
+                                                                                If Left(doc.SupervisorUserName(0),2)="MX" Then
+                                                                                Else
+                                                                                        readerList(6) =doc.SupervisorUserName(0)+"/"
+                                                                                End If
+                                                                        End If
+                                                                        
+                                                                        If doc.SManagerUserName(0)<>"" Then
+                                                                                If Left(doc.SManagerUserName(0),2)="MX" Then
+                                                                                Else
+                                                                                        readerList(7) =doc.SManagerUserName(0)+"/"
+                                                                                End If
+                                                                        End If
+                                                                        If doc.SManagerUserName(0)<>doc.tSManagerUserName(0) Then
+                                                                                If Left(doc.tSManagerUserName(0),2)="MX" Then
+                                                                                Else
+                                                                                        readerList(8) =doc.tSManagerUserName(0)+"/"
+                                                                                End If
+                                                                        End If                                
+                                                                        
+                                                                        If Not settingProfile Is Nothing Then
+                                                                                If doc.Subsidiary(0)="MXA" Then
+                                                                                        readerList(9) =Strleft(settingProfile.MXAApproverEMail(0),"@")+"/"
+                                                                                Elseif doc.Subsidiary(0)="MXE" Then
+                                                                                        readerList(9) =Strleft(settingProfile.MXEApproverEMail(0),"@")+"/"
+                                                                                Elseif doc.Subsidiary(0)="MXH" Then
+                                                                                        readerList(9) =Strleft(settingProfile.MXHKApproverEMail(0),"@")+"/"
+                                                                                Elseif doc.Subsidiary(0)="MXK" Then
+                                                                                        readerList(9) =Strleft(settingProfile.MXKApproverEMail(0),"@")+"/"
+                                                                                Elseif doc.Subsidiary(0)="MXS" Then 
+                                                                                        readerList(9) =Strleft(settingProfile.MXSApproverEMail(0),"@")+"/"
+                                                                                Elseif doc.Subsidiary(0)="MXC" Then
+                                                                                        readerList(9) =Strleft(settingProfile.MXmApproverEMail(0),"@")+"/"
+                                                                                Elseif doc.Subsidiary(0)="MXJ" Then
+                                                                                        readerList(9) =Strleft(settingProfile.MXJApproverEMail(0),"@")+"/"
+                                                                                End If
+                                                                        End If
+                                                                        
+                                                                        Dim readerGroupList(1) As String
+                                                                        readerGroupList(0)="VIP"
+                                                                        readerGroupList(1)="CMS"
+                                                                        
+                                                                        '>>>202109 建立暫存文件，存放已完成加密後的檔案
+                                                                        Dim TmpDoc As NotesDocument
+                                                                        Set TmpDoc = db.CreateDocument()
+                                                                        Dim TmpObject As New NotesRichTextItem(TmpDoc , "Body")
+                                                                        tmpString=embedeDSMAttachment(TempDir+filename, TmpDoc, "Body", readerList,readerGroupList,"", "", "",False)                                                                                                 
+                                                                        '<<<202109 建立暫存文件，存放已完成加密後的檔案
+                                                                        
+                                                                        
+                                                                'tmpString=embedeDSMAttachment("c:\temp\NotesAPTemp"+"\"+filename, doc, "FinalContractFile", readerList,readerGroupList,"", "", "",False) 
+                                                                        'tmpString=embedeDSMAttachment(TempDir+filename, contractDoc, "body", readerList,readerGroupList,"", "", "",False) 'NEW 201808 新增歷版契約附件表格                                                                        
+                                                                        'tmpString=embedeDSMAttachment(TempDir+filename, doc, "FinalContractFile", readerList,readerGroupList,"", "", "",False) 
+                                                                        Call AppendEDSMFile(TmpDoc,"Body",contractDoc,"Body") 'SourceDoc ,SourceField,TargetDoc,TargetField '202109
+                                                                        Call AppendEDSMFile(TmpDoc,"Body",doc,"FinalContractFile") 'SourceDoc ,SourceField,TargetDoc,TargetField 202109
+                                                                        
+                                                                        
+                                                                        
+                                                                        Redim readerList(0) As String
+                                                                        Dim readerGroupList2(0) As String
+                                                                        readerGroupList2(0)="CMSPrint"
+                                                                        
+                                                                        
+                                                                'tmpString=embedeDSMAttachment("c:\temp\NotesAPTemp"+"\"+filename, doc, "FinalContractFile_Auth", readerList, readerGroupList2,"ALLOWPRINTANDEDIT", "", "",False) 
+                                                                        tmpString=embedeDSMAttachment(TempDir+filename, doc, "FinalContractFile_Auth", readerList, readerGroupList2,"ALLOWPRINTANDEDIT", "", "",False) 
+                                                                Else
+                                                                'Call targetObject.EmbedObject ( EMBED_ATTACHMENT, "", "c:\temp\NotesAPTemp"+"\"+filename)
+                                                                        Call targetObject.EmbedObject ( EMBED_ATTACHMENT, "", TempDir+filename) 'EDIT 201808 新增歷版契約附件表格
+                                                                End If
+                                                        'Call targetObject.EmbedObject ( EMBED_ATTACHMENT, "", "c:\temp\NotesAPTemp"+"\"+filename)
+                                                        'Kill "c:\temp\NotesAPTemp"+"\"+filename
+                                                                
+                                                        Else
+                                                                '20220420 新增無法加密Log >>>>>>>
+                                                                'GCMS
+                                                                Dim LogStr As String
+                                                                Dim LogEngStr As String
+                                                                Dim LogItem As NotesItem
+                                                                Dim LogEngItem As NotesItem
+                                                                Set LogItem = GetItemObj(doc,"Log","")
+                                                                Set LogEngItem = GetItemObj(doc,"LogEng","")
+                                                                LogStr =  "DeployAdmin  於 " + Cstr(Cstr(Format(Now , "yyyy/mm/dd hh:nn:ss"))) + " 加密軟體無法辨識" + GetExtension(filename) + "格式，無法加密"
+                                                                LogEngStr =  "DeployAdmin can not encrypt The file format of " + GetExtension(filename) + " at " + Cstr(Cstr(Format(Now , "yyyy/mm/dd hh:nn:ss")))
+                                                                Call LogItem.AppendToTextList(LogStr)
+                                                                Call LogEngItem.AppendToTextList(LogEngStr)
+                                                                Call doc.Save(True , True)
+                                                                '20220420 新增無法加密Log <<<<<<<<
+                                                                
+                                                                Call targetObject.EmbedObject(EMBED_ATTACHMENT, "", TempDir+filename)
+                                                                Call printtargetObject.EmbedObject(EMBED_ATTACHMENT, "", TempDir+filename)
+                                                                Set rtitem = contractDoc.GetFirstItem("Body")        
+                                                                Call rtitem.EmbedObject(EMBED_ATTACHMENT, "", TempDir+filename)
+                                                                If tmpflag="" Then
+                                                                        tmpflag=filename
+                                                                Else
+                                                                        tmpflag=tmpflag+"、"+filename
+                                                                End If
+                                                        End If
+                                                        
+                                   '2021Fix 簡體字刪除
+                                                        If Dir(TempDir+filename) <> "" Then
+                                                                Kill TempDir+filename '201808 新增歷版契約附件表格 
+                                                        Else
+                                                                Call KillSimpleFile(TempDir+filename)
+                                                        End If
+                                                Next
+                                                If tmpflag<>"" Then
+                                                        Call SendFomatErrorNotify(tmpflag,tdoc.subject(0),doc.SUserEMail(0))
+                                                End If
+                                                '>>>>201808 新增歷版契約附件表格
+                                                Call contractDoc.ComputeWithForm(True,False)
+                                                Call contractDoc.Save(True , True)
+                                                '201808 新增歷版契約附件表        
+                                        End If
+                                End If
+                        End If
+                End If
+        End If
+        
+        '>>>>NEW 201808 新增歷版契約附件表格 
+        Dim docLink As Variant
+        Dim tmpItem As NotesItem
+        Dim tmpEngItem As NotesItem        
+        If Not ( contractDoc Is Nothing ) Then
+                Set tmpItem = doc.GetFirstItem("ContractLogDate")
+                Call tmpItem.AppendToTextList(Format(Now,"yyyy/mm/dd HH:MM:SS"))        'for Req. HA900168
+                Set tmpItem = doc.GetFirstItem("ContractLogModifier")
+                Set tmpEngItem = doc.GetFirstItem("ContractLogModifierUserName")
+                
+                Call tmpItem.AppendToTextList(xSrcType)
+                If Not tmpEngItem Is Nothing Then
+                        Call tmpEngItem.AppendToTextList(xSrcType)
+                End If
+                
+                Set tmpItem = doc.GetFirstItem("ContractLogVersion")
+                Call tmpItem.AppendToTextList("V " + Cstr(Format(doc.ContractEdition(0) , "###.0")))
+                Set tmpItem = doc.GetFirstItem("ContractLogList")
+                Call tmpItem.AppendToTextList(Cstr(contractDoc.UniversalID))
+                doc.NewestUID = contractDoc.UniversalID
+                doc.ContractEdition = doc.ContractEdition(0) + 1
+                doc.HasContractVersion = 1
+                doc.ContractFlag = 0
+                Call doc.Save(True , True)
+        End If
+%REM
+        Dim tmpItem1 As NotesItem        
+        Set tmpItem1 = doc.GetFirstItem("AttachmentLogList")        
+        Call tmpItem1.AppendToTextList("---N/A---")
+        doc.NewestAttachmentUID = ""        
+        doc.AttachmentEdition = doc.AttachmentEdition(0) + 1
+        doc.HasAttachmentVersion = 1
+        doc.AttachmentFlag = 0
+        Call doc.Save(True,True)
+%END REM
+        '<<<<NEW 201808 新增歷版契約附件表格
+        
+        Exit Sub        
+        
+err_handle:
+        Dim errSession As New NotesSession
+        Dim errDB As NotesDatabase
+        Set errDB=errSession.CurrentDatabase
+        
+        Dim errMailForm As New NotesDocument(errDB)        
+        Dim errLink_doc As New NotesRichTextItem(errMailForm , "Body")
+        errMailForm.Form = "Memo"
+        errMailForm.SendTo = "Yorkhsu Lin/TAIWAN/MXIC"
+        errMailForm.CopyTo = "Arwin Chang/TAIWAN/MXIC"
+        errMailForm.Subject = "("+xInBoxKey+")CmsGcmsFinalFormalAgentByMailDb \ CreateNewContract1 Error"        
+        Call errLink_doc.AppendText("錯誤訊息："+Error$)
+        Call errLink_doc.AddNewline(2)
+        Call errLink_doc.AppendText("錯誤行數："+ Cstr(Erl))
+        Call errLink_doc.AddNewline(2)
+        Resume Next 
+        Call errMailForm.Send(False)
+        Exit Sub
+End Sub
+Function NotifyCounterParty(doc As NotesDocument,subject As String ) As Integer
+        Dim s As New NotesSession
+        Dim db As NotesDatabase
+        On Error Goto Errh
+        Dim maildoc As NotesDocument
+        Dim systemprofile As NotesDocument
+        Dim xsbj As String, xbody As String
+        Dim rt As NotesRichTextItem
+        Dim xview As NotesView
+        Dim dc As NotesDocumentCollection
+        Dim xdoc As NotesDocument, fdoc As NotesDocument
+        Dim count As Integer
+        count = 0                
+        xsbj=subject
+        xbody="Lawyer has provided the final version."        
+        Set maildoc=doc.ParentDatabase.CreateDocument
+        maildoc.sendto="cmscounterparty@mxic.com.tw"
+        
+        maildoc.principal = xInBoxKey        
+        maildoc.DisplaySent = xInBoxKey        
+        maildoc.Importance = "3"
+        maildoc.Subject = xsbj
+        maildoc.form="Memo"
+        maildoc.PostedDate=Now
+        maildoc.From=xInBoxKey                        
+        'maildoc.ReplyTo=Leftback(Rightback(Cdoc.txtMgrInfo(0), "("), ")")                        '--系統管理者
+        Set rt = maildoc.CreateRichTextItem("Body")
+        rt.AppendText(xbody)
+        rt.Addnewline(1)
+        rt.Addnewline(1)
+'        Call rt.Appendtext("Mail Link- ->")
+'        Call rt.Appenddoclink(doc,"Doc Link")
+        rt.Addnewline(1)
+        If maildoc.sendto(0)<>"" Then
+                Call maildoc.Send(False)
+        End If
+        
+        Exit Function
+Errh:
+        Dim errSession As New NotesSession
+        Dim errDB As NotesDatabase
+        Set errDB=errSession.CurrentDatabase
+        
+        Dim errMailForm As New NotesDocument(errDB)        
+        Dim errLink_doc As New NotesRichTextItem(errMailForm , "Body")
+        errMailForm.Form = "Memo"
+        errMailForm.SendTo = "Arwin Chang/TAIWAN/MXIC"
+        errMailForm.CopyTo = "Yorkhsu Lin/TAIWAN/MXIC"
+        errMailForm.Subject = "("+xInBoxKey+")CmsGcmsFinalFormalAgentByMailDb \ NotifyCounterParty Error"        
+        Call errLink_doc.AppendText("錯誤訊息："+Error$)
+        Call errLink_doc.AddNewline(2)
+        Call errLink_doc.AppendText("錯誤行數："+ Cstr(Erl))
+        Call errMailForm.Send(True)
+        Delete errMailForm
+        Resume Next
+        Exit Function
+End Function
+Sub ProcessAttachmentSCMS(doc As NotesDocument,tdoc As NotesDocument)
+        On Error Goto err_handle         
+        '判斷是否有新插入之合約檔案
+        Dim contractObjectCount As Integer        
+        Set sourceObject = tdoc.GetFirstItem("Body")        
+        contractObjectCount = 0
+        If Not ( sourceObject Is Nothing ) Then
+                If Not ( Isempty(sourceObject.EmbeddedObjects) ) Then
+                        Forall contract In sourceObject.EmbeddedObjects
+                                contractObjectCount = contractObjectCount + 1
+                        End Forall
+                End If
+        End If
+        
+        Select Case contractObjectCount
+        Case 0 : '沒有新插入之合約檔案
+                Call CreateNewContractSCMS(doc,tdoc,0 , sourceObject , 1) '201911 for 取消判斷附件
+        Case Else : Call CreateNewContractSCMS(doc,tdoc,1 , sourceObject , 1) '有新插入合約檔案
+        End Select
+        
+        Call doc.Save(True , True)
+        Exit Sub        
+        
+err_handle:
+        Dim errSession As New NotesSession
+        Dim errDB As NotesDatabase
+        Set errDB=errSession.CurrentDatabase
+        
+        Dim errMailForm As New NotesDocument(errDB)        
+        Dim errLink_doc As New NotesRichTextItem(errMailForm , "Body")
+        errMailForm.Form = "Memo"
+        errMailForm.SendTo = "Yorkhsu Lin/TAIWAN/MXIC"
+        errMailForm.CopyTo = "Arwin Chang/TAIWAN/MXIC"
+        errMailForm.Subject = "("+xInBoxKey+")CmsGcmsFinalFormalAgentByMailDb \ ProcessAttachmentSCMS Error"
+        Call errLink_doc.AppendText("錯誤訊息："+Error$)
+        Call errLink_doc.AddNewline(2)
+        Call errLink_doc.AppendText("錯誤行數："+ Cstr(Erl))
+        Call errLink_doc.AddNewline(2)
+        
+        Call errMailForm.Send(False)
+        Exit Sub
+End Sub
+Function IsMember(tstr As String, va As Variant) As Integer
+        Dim ret_val As Integer
+        
+        ret_val = False
+        
+     'Loop through each value in the array
+        Forall s In va
+          'Compare the string with each member of the array
+                If tstr = s Then
+                        ret_val = True
+               'If the string is a member then break out of the loop
+                        Exit Forall
+                End If
+        End Forall
+        
+        IsMember = ret_val
+End Function
+Function GetItemObj(doc As NotesDocument, xItemName As String, xType As String) As NotesItem
+        'xType : A:IsAuthors , R:IsReaders ,
+        Dim xItem As NotesItem
+        If  Not (doc.HasItem(xItemName)) Then    
+                Set xItem = New NotesItem(doc, xItemName, xVal)
+                xItem.IsSummary = True
+                If xType="A" Then
+                        xItem.IsAuthors=True
+                Elseif xType="R" Then
+                        xItem.IsReaders=True
+                End If
+        Else
+                Set xItem = doc.GetFirstItem(xItemName)
+        End If
+        Set GetItemObj = xItem
+End Function
+Function getFlowNumberHeader(xDocNo As String) As String
+        getFlowNumberHeader = ""        
+        
+        xLen=Len(xDocNo)
+        For i=1 To xLen
+                xval=Mid$(xDocNo, i, 1)
+                If IsNumeric(xval) Then
+                        xKeyLen=i-1
+                        Exit For
+                End If
+        Next
+        If InStr(xDocNo,"MX") > 0Then
+                getFlowNumberHeader= Right( Left(xDocNo,xKeyLen) , Len(Left(xDocNo,xKeyLen))-3)
+        Else
+                getFlowNumberHeader=Left(xDocNo,xKeyLen)                        
+        End If
+        
+End Function
+
+
+Function FillContractFinalName(Doc As notesdocument)As String        
+        On Error Goto err_handle
+        Dim session As New NotesSession
+        Dim db As NotesDatabase        
+        Set db = session.CurrentDatabase                
+        Dim filename1 As String
+        filename1=""
+        Dim xitem As NotesItem
+        Dim sourceObject1 As NotesRichTextItem        
+        Dim tmpcontractname As NotesItem
+        If doc.HasItem( "ContractFinallyName" ) Then '201911 for SCMS
+                Set tmpcontractname = doc.GetFirstItem("ContractFinallyName")
+        Else '201911 for SCMS
+                Set  tmpcontractname=  New NotesRichTextItem(doc , "ContractFinallyNam") '201911 for SCMS
+        End If '201911 for SCMS
+        Dim contract As Integer        
+        If doc.HasItem( "FinalContractFile" ) Then        
+                Set xitem=doc.GetFirstItem("FinalContractFile")
+                If (  xitem.Type = RICHTEXT ) Then
+                        Set sourceObject1 = doc.GetFirstItem("FinalContractFile")
+                Else
+                        Call xitem.Remove()
+                        Set sourceObject1=  New NotesRichTextItem(doc , "FinalContractFile")
+                End If
+        Else
+                Set sourceObject1=  New NotesRichTextItem(doc , "FinalContractFile")
+        End If
+        If ( sourceObject1.Type = RICHTEXT ) Then
+                If Not ( Isempty(sourceObject1.EmbeddedObjects) ) Then
+                        tmpcontractname.Values=""
+                        For contract=0 To  Ubound(sourceObject1.EmbeddedObjects)
+                                filename1 =""
+                                filename1 = sourceObject1.EmbeddedObjects(contract).Source
+                                Call tmpcontractname.AppendToTextList(filename1)
+                        Next
+                        Call doc.Save(True,True)
+                End If
+        End If        
+        Exit Function        
+        
+err_handle:
+        Dim errSession As New NotesSession
+        Dim errDB As NotesDatabase
+        Set errDB=errSession.CurrentDatabase        
+        Dim errMailForm As New NotesDocument(errDB)        
+        Dim errLink_doc As New NotesRichTextItem(errMailForm , "Body")
+        errMailForm.Form = "Memo"
+        errMailForm.SendTo = "Yorkhsu Lin/TAIWAN/MXIC"
+        errMailForm.CopyTo = "Arwin Chang/TAIWAN/MXIC"
+        errMailForm.Subject = "("+xInBoxKey+")CmsGcmsFinalFormalAgentByMailDb \ FillContractFinalName Error"        
+        Call errLink_doc.AppendText("錯誤訊息："+Error$)
+        Call errLink_doc.AddNewline(2)
+        Call errLink_doc.AppendText("錯誤行數："+ Cstr(Erl))
+        Call errLink_doc.AddNewline(2)
+        Call errMailForm.Send(False)
+        Exit Function
+End Function
+Sub CreateNewContract(doc As NotesDocument,tdoc As NotesDocument,hasContractFile As Integer , sourceObject As Variant , sourceObjectType As Integer)
+        On Error Goto err_handle         
+     'hasContractFile : 1 ==> has Contract File          0 ==> no Contract File
+        'sourceObjectType : 1 ==> Attahment          0 ==> "---N/A---"
+        'doc : cms doc
+        'tdoc : MailDoc
+        '>>>>NEW 201808 新增歷版契約附件表格
+        Dim isApplyForm As String
+        Dim isNewContractDoc As String
+        If doc.Form(0)="ApplyForm" Or doc.Form(0)="ApplyForm1" Then
+                isApplyForm="Y"
+        Else
+                isApplyForm="N"
+        End If
+        'xSrcType="cmsfinal"  '來源信箱 '
+        'TempDir = Environ("Temp")+"\" ' '?????????????????????
+        TempDir = "E:\APTemp\"
+        'TempDir = "c:\temp\NotesAPTemp"+"\" ' ???????????????
+        Dim rtfItem As NotesItem 'NotesRichTextItem
+        '<<<<NEW 201808 新增歷版契約附件表格
+        
+        Dim contractDoc As NotesDocument
+        Dim s As New NotesSession
+        Dim db As NotesDatabase        
+        Set db = s.CurrentDatabase
+        'Dim dbinfoProfile As NotesDocument         '201911 for 取消判斷附件
+        Dim targetObject As NotesRichTextItem
+        Dim targetObject_Auth As NotesRichTextItem
+        
+        Dim tmpflag As String
+        tmpflag=""
+        '>>>>>201911 for 取消判斷附件
+        'Set dbinfoProfile=db.GetProfileDocument("DBInfo Profile")  '201911 for 取消判斷附件
+        'Dim CMS_DB As New NotesDatabase(dbinfoProfile.CMSServer(0),dbinfoProfile.CMSPath(0))  '201911 for 取消判斷附件
+        
+        '>>>>NEW 201808 新增歷版契約附件表格
+        If tdoc.CntractDocUID(0)<>"" Then '已有MainForm 或 FormalForm建立之contractDoc
+                Set contractDoc=CMS_DB.GetDocumentByUNID(tdoc.CntractDocUID(0))
+                If Not(contractDoc Is Nothing) Then
+                        If contractDoc.HasItem("Body") Then
+                                Set rtfItem=contractDoc.GetFirstItem("Body")
+                                Call rtfItem.Remove()
+                        End If
+                Else
+                        Set contractDoc=Nothing
+                End If
+        Else
+                Set contractDoc=Nothing
+        End If
+        If contractDoc Is Nothing Then
+                isNewContractDoc="Y"
+                Set contractDoc = New NotesDocument(CMS_DB)
+                Call contractDoc.MakeResponse(doc)
+                contractDoc.Form = "ContractForm"
+                contractDoc.CreatedBy = xSrcType
+                contractDoc.CreatedByUserName = xSrcType
+                If doc.Form(0)="FormalForm" Then
+                        contractDoc.ContractName = doc.ContractTitle(0)                                                                
+                Else
+                        contractDoc.ContractName = doc.ContractName(0)
+                End If
+                contractDoc.ContractEdition = doc.ContractEdition(0)                
+        End If
+        
+        'Mail Body Append 到ContractForm
+        Dim ContractObject As New NotesRichTextItem(contractDoc , "Body")
+        Dim rtitem As NotesRichTextItem
+        Set rtitem = tdoc.GetFirstItem("Body" )
+        If Not ( rtitem Is Nothing ) Then
+                If ( rtitem.Type = RICHTEXT ) Then
+                        Call ContractObject.AppendRTItem( rtitem )
+                End If
+        End If
+        '202204 強化ContractForm 關聯性 --- Start
+        contractDoc.MailUNID = tDoc.UniversalID '信件UNID
+        contractDoc.FlowNumber = doc.FlowNumber '所屬案件編號
+        '202204 強化ContractForm 關聯性 --- End
+        Call contractDoc.Save(True , False)
+        Call CreateMonitorForm(contractDoc,doc,"CMS") '202110 MonitorForm
+        
+        '移除原附件
+        Dim isChg As String
+        isChg="N"
+        Set rtitem = contractDoc.GetFirstItem("Body")        
+        If Not (rtitem Is Nothing ) Then
+                If Not ( Isempty(rtitem.EmbeddedObjects) ) Then
+                        Forall o In rtitem.EmbeddedObjects
+                                If (o.Type = EMBED_ATTACHMENT) Then
+                                        Call o.Remove
+                                        isChg="Y"
+                                End If
+                        End Forall
+                End If
+        End If
+        Call contractDoc.ComputeWithForm(True,False)
+        Call contractDoc.Save(True , False)
+        '<<<<<201911 for 取消判斷附件
+        
+        Dim contract As Integer
+        If Not ( sourceObject Is Nothing ) Then
+                If ( sourceObject.Type = RICHTEXT ) Then
+                        If Not ( Isempty(sourceObject.EmbeddedObjects)) Then
+                                Set targetObject=doc.GetFirstItem("FinalContractFile")
+                                If targetObject Is Nothing Then
+                                        Set targetObject =  New NotesRichTextItem(doc , "FinalContractFile")
+                                End If
+                                Set targetObject_Auth=doc.GetFirstItem("FinalContractFile_Auth")
+                                If targetObject_Auth Is Nothing Then
+                                        Set targetObject_Auth =  New NotesRichTextItem(doc , "FinalContractFile_Auth")
+                                End If
+                                Dim filename As String
+                                If ( sourceObject.Type = RICHTEXT ) Then
+                                        If Not ( Isempty(sourceObject.EmbeddedObjects) ) Then        
+                                                
+                                                '>>>>>201911 for 取消判斷附件 建立ContractForm改在上方
+%REM
+                                                '>>>>NEW 201808 新增歷版契約附件表格
+                                                If tdoc.CntractDocUID(0)<>"" Then '已有MainForm 或 FormalForm建立之contractDoc
+                                                        Set contractDoc=CMS_DB.GetDocumentByUNID(tdoc.CntractDocUID(0))
+                                                        If Not(contractDoc Is Nothing) Then
+                                                                If contractDoc.HasItem("Body") Then
+                                                                        Set rtfItem=contractDoc.GetFirstItem("Body")
+                                                                        Call rtfItem.Remove()
+                                                                End If
+                                                        Else
+                                                                Set contractDoc=Nothing
+                                                        End If
+                                                Else
+                                                        Set contractDoc=Nothing
+                                                End If
+                                                If contractDoc Is Nothing Then
+                                                        isNewContractDoc="Y"
+                                                        Set contractDoc = New NotesDocument(CMS_DB)
+                                                        Call contractDoc.MakeResponse(doc)
+                                                        contractDoc.Form = "ContractForm"
+                                                        contractDoc.CreatedBy = xSrcType
+                                                        contractDoc.CreatedByUserName = xSrcType
+                                                        If doc.Form(0)="FormalForm" Then
+                                                                contractDoc.ContractName = doc.ContractTitle(0)                                                                
+                                                        Else
+                                                                contractDoc.ContractName = doc.ContractName(0)
+                                                        End If                                                        
+                                                        contractDoc.ContractEdition = doc.ContractEdition(0)                                                        
+                                                End If
+                                                Dim ContractObject As New NotesRichTextItem(contractDoc , "Body")
+                                                Call contractDoc.Save(True , False)
+                                                '<<<<NEW 201808 新增歷版契約附件表格
+%END REM
+                                                '<<<<<201911 for 取消判斷附件 建立ContractForm改在上方
+                                                
+                                                For contract=0 To  Ubound(sourceObject.EmbeddedObjects)
+                                                        filename=""
+                                                        'filename = sourceObject.EmbeddedObjects(contract).Name
+                                                        filename = sourceObject.EmbeddedObjects(contract).Source 'Fix Notes 自動處理檔名 issue
+                                                        'Call sourceObject.EmbeddedObjects(contract).ExtractFile("c:\temp\NotesAPTemp"+"\"+filename)        
+                                                        'Call targetObject.EmbedObject ( EMBED_ATTACHMENT, "", Environ("Temp")+"\"+filename)
+                                                        Call sourceObject.EmbeddedObjects(contract).ExtractFile(TempDir+filename)
+                                                        If CheckFileName(filename)="Success" Then                
+                                                                
+                                                                Dim readerIndex As Integer
+                                                                readerIndex=6
+                                                                Redim readerList(readerIndex) As String
+                                                                
+                                                        '>>>>>201912 Final 新增權限InfiledLawyer
+                                                                If Instr(doc.InfiledLawyer(0),"/MXIC")<> 0 Then
+                                                                        readerIndex=readerIndex+1
+                                                                        Redim Preserve readerList(readerIndex) 
+                                                                        readerList(readerIndex) =doc.InfiledLawyer(0)
+                                                                        readerIndex=readerIndex+1
+                                                                End If
+                                                        '<<<<<201912 Final 新增權限InfiledLawyer
+                                                                
+                                                                
+                                                                '>>>202109 新增FV 法務權限
+                                                                readerIndex=readerIndex+1
+                                                                Redim Preserve readerList(readerIndex) 
+                                                                readerList(readerIndex) =doc.FVIPLUserName(0)
+                                                                readerIndex=readerIndex+1
+                                                                '<<<202109 新增FV 法務權限
+                                                                
+                                                                
+                                                                
+                                                                readerList(0) =doc.UserName(0)
+                                                                readerList(1) =doc.UserName1(0)
+                                                                readerList(2) =doc.UserName2(0)
+                                                        'readerList(3) =doc.IPLUserName(0)
+                                                                readerList(4) ="Stacey Lee/TAIWAN/MXIC"
+                                                                If Left(doc.ContractDept(0),2) = "MJ" Then
+                                                                'readerList(5) ="Sally Wang/TAIWAN/MXIC"
+                                                                End If
+                                                                
+                                                                Forall a In doc.ChiefMgrUserName
+                                                                        Redim Preserve readerList(readerIndex) As String
+                                                                        readerList(readerIndex) =Cstr(a)
+                                                                        readerIndex=readerIndex+1
+                                                                End Forall
+                                                                
+                                                                If Isarray(doc.IPLUserName) Then
+                                                                        For i=0 To Ubound(doc.IPLUserName)
+                                                                                Redim Preserve readerList(readerIndex+i+1) As String
+                                                                                readerList(readerIndex+i+1)=doc.IPLUserName(i)
+                                                                        Next
+                                                                Else
+                                                                        readerList(3) =doc.IPLUserName(0)
+                                                                End If
+                                                                
+                                                                Dim readerGroupList(1) As String
+                                                                readerGroupList(0)="VIP"
+                                                                readerGroupList(1)="CMS"
+                                                                
+                                                                '>>>202109 建立暫存文件，存放已完成加密後的檔案
+                                                                Dim TmpDoc As NotesDocument
+                                                                Set TmpDoc = db.CreateDocument()
+                                                                Dim TmpObject As New NotesRichTextItem(TmpDoc , "Body")
+                                                                tmpString=embedeDSMAttachment(TempDir+filename, TmpDoc, "Body", readerList,readerGroupList,"", "", "",False)                                                                                                 
+                                                                '<<<202109 建立暫存文件，存放已完成加密後的檔案
+                                                                
+                                                        'tmpString=embedeDSMAttachment("c:\temp\NotesAPTemp"+"\"+filename, doc, "FinalContractFile", readerList,readerGroupList,"", "", "",False) 
+                                                         '>>>>NEW 201808 新增歷版契約附件表格 ??????xxreaderList->readerList
+                                                                'tmpString=embedeDSMAttachment(TempDir+filename, contractDoc, "Body", readerList,readerGroupList,"", "", "",False) 
+                                                                Call AppendEDSMFile(TmpDoc,"Body",contractDoc,"Body") 'SourceDoc ,SourceField,TargetDoc,TargetField '202109
+                                                         '<<<<NEW 201808 新增歷版契約附件表格
+                                                                
+                                                                If isApplyForm="Y" Then 'NEW 201808 新增歷版契約附件表格 ????xxreaderList->readerList
+                                                                        Call AppendEDSMFile(TmpDoc,"Body",doc,"FinalContractFile") 'SourceDoc ,SourceField,TargetDoc,TargetField 202109
+                                                                        'tmpString=embedeDSMAttachment(TempDir+filename, doc, "FinalContractFile", readerList,readerGroupList,"", "", "",False) 
+                                                                End If 'NEW 201808 新增歷版契約附件表格
+                                                                
+                                                                Redim readerList(0) As String
+                                                                Dim readerGroupList2(0) As String
+                                                                readerGroupList2(0)="CMSPrint"
+                                                                
+                                                        'tmpString=embedeDSMAttachment("c:\temp\NotesAPTemp"+"\"+filename, doc, "FinalContractFile_Auth", readerList, readerGroupList2,"ALLOWPRINTANDEDIT", "", "",False) 
+                                                                If isApplyForm="Y" Then 'NEW 201808 新增歷版契約附件表格 ????xxreaderList->readerList
+                                                                        tmpString=embedeDSMAttachment(TempDir+filename, doc, "FinalContractFile_Auth", readerList, readerGroupList2,"ALLOWPRINTANDEDIT", "", "",False) 
+                                                                End If 'NEW 201808 新增歷版契約附件表格
+                                                                'Kill "c:\temp\NotesAPTemp"+"\"+filename
+                                                                
+                                                        Else
+                                                                '20220420 新增無法加密Log >>>>>>>
+                                                                'CMS
+                                                                Dim LogStr As String
+                                                                Dim LogEngStr As String
+                                                                Dim LogItem As NotesItem
+                                                                Dim LogEngItem As NotesItem
+                                                                Set LogItem = GetItemObj(doc,"Log","")
+                                                                Set LogEngItem = GetItemObj(doc,"LogEng","")
+                                                                LogStr =  "DeployAdmin  於 " + Cstr(Cstr(Format(Now , "yyyy/mm/dd hh:nn:ss"))) + " 加密軟體無法辨識" + GetExtension(filename) + "格式，無法加密"
+                                                                LogEngStr =  "DeployAdmin can not encrypt The file format of " + GetExtension(filename) + " at " + Cstr(Cstr(Format(Now , "yyyy/mm/dd hh:nn:ss")))
+                                                                Call LogItem.AppendToTextList(LogStr)
+                                                                Call LogEngItem.AppendToTextList(LogEngStr)
+                                                                Call doc.Save(True , True)
+                                                                '20220420 新增無法加密Log <<<<<<<<
+                                                                
+                                                                Call targetObject.EmbedObject(EMBED_ATTACHMENT, "", TempDir+filename)
+                                                                Call targetObject_Auth.EmbedObject(EMBED_ATTACHMENT, "", TempDir+filename)
+                                                                Set rtitem = contractDoc.GetFirstItem("Body")        
+                                                                Call rtitem.EmbedObject(EMBED_ATTACHMENT, "", TempDir+filename)
+                                                                If tmpflag="" Then
+                                                                        tmpflag=filename
+                                                                Else
+                                                                        tmpflag=tmpflag+"、"+filename
+                                                                End If
+                                                        End If
+                                                        
+                                                        '2021Fix 簡體字刪除
+                                                        If Dir(TempDir+filename) <> "" Then
+                                                                Kill TempDir+filename '201808 新增歷版契約附件表格 
+                                                        Else
+                                                                Call KillSimpleFile(TempDir+filename)
+                                                        End If
+                                                        
+                                                Next        
+                                                If tmpflag<>"" Then
+                                                        Call SendFomatErrorNotify(tmpflag,tdoc.subject(0),doc.UserName(0))
+                                                End If
+                                                '>>>>NEW 201808 新增歷版契約附件表格
+                                                Call contractDoc.ComputeWithForm(True,False)
+                                                Call contractDoc.Save(True , True)
+                                                '<<<<NEW 201808 新增歷版契約附件表格
+                                        End If
+                                End If
+                        End If
+                End If
+        End If
+        '>>>>NEW 201808 新增紀錄歷版契約 / 附件 , 程式碼參考 DB : cmsinbox , Agent : CmsGcmsmailboxAgent
+        Dim docLink As Variant
+        Dim tmpItem As NotesItem
+        Dim tmpEngItem As NotesItem
+        
+        If Not ( contractDoc Is Nothing ) Then
+                If tdoc.CntractDocUID(0)="" Then  '歷版契約已記錄
+                        Set tmpItem = doc.GetFirstItem("ContractLogDate")
+                        Call tmpItem.AppendToTextList(Format(Now,"yyyy/mm/dd HH:MM:SS"))        'for Req. HA900168
+                        Set tmpItem = doc.GetFirstItem("ContractLogModifier")
+                        Set tmpEngItem = doc.GetFirstItem("ContractLogModifierUserName")
+                        
+                        Call tmpItem.AppendToTextList(xSrcType)
+                        If Not tmpEngItem Is Nothing Then
+                                Call tmpEngItem.AppendToTextList(xSrcType)
+                        End If
+                        
+                        Set tmpItem = doc.GetFirstItem("ContractLogVersion")
+                        Call tmpItem.AppendToTextList("V " + Cstr(Format(doc.ContractEdition(0) , "###.0")))
+                        Set tmpItem = doc.GetFirstItem("ContractLogList")
+                        Call tmpItem.AppendToTextList(Cstr(contractDoc.UniversalID))
+                        doc.NewestUID = contractDoc.UniversalID
+                        doc.ContractEdition = doc.ContractEdition(0) + 1
+                        doc.HasContractVersion = 1
+                        doc.ContractFlag = 0
+                        'doc.CntractDocUID=tdoc.CntractDocUID '歷版契約記錄
+                        Call doc.Save(True , True)
+                End If                
+                '>>>>NEW 201808 新增歷版契約附件表格
+                If tdoc.CntractDocUID(0)<>"" Then
+                Else
+                        tdoc.CntractDocUID=contractDoc.UniversalID 'MainForm 或 FormalForm建立之contractDoc UNID
+                        Call tdoc.Save(True,False)        
+                End If
+              '<<<<NEW 201808 新增歷版契約附件表格
+        End If
+%REM
+        Dim tmpItem1 As NotesItem        
+        Set tmpItem1 = doc.GetFirstItem("AttachmentLogList")        
+        Call tmpItem1.AppendToTextList("---N/A---")
+        doc.NewestAttachmentUID = ""        
+        doc.AttachmentEdition = doc.AttachmentEdition(0) + 1
+        doc.HasAttachmentVersion = 1
+        doc.AttachmentFlag = 0
+        Call doc.Save(True,True)
+%END REM
+        '<<<<NEW 201808 新增歷版契約附件表格
+        
+        Exit Sub        
+        
+err_handle:
+        Dim errSession As New NotesSession
+        Dim errDB As NotesDatabase
+        Set errDB=errSession.CurrentDatabase
+        
+        Dim errMailForm As New NotesDocument(errDB)        
+        Dim errLink_doc As New NotesRichTextItem(errMailForm , "Body")
+        errMailForm.Form = "Memo"
+        errMailForm.SendTo = "Yorkhsu Lin/TAIWAN/MXIC"
+        errMailForm.CopyTo = "Arwin Chang/TAIWAN/MXIC"
+        errMailForm.Subject = "("+xInBoxKey+")CmsGcmsFinalFormalAgentByMailDb \ CreateNewContract Error"
+        Call errLink_doc.AppendText("錯誤訊息："+Error$)
+        Call errLink_doc.AddNewline(2)
+        Call errLink_doc.AppendText("錯誤行數："+ Cstr(Erl))
+        Call errLink_doc.AddNewline(2)
+        'Resume Next  '201911 for 取消判斷附件
+        Call errMailForm.Send(False)
+        Exit Sub
+End Sub
+Function NotifyMutiCaseToIT(Subject As String)
+'當信件出現"、"時，發信通知 IT 人員
+'Ex:S19NDAXX、S18NDASSS
+        On Error Goto Errh
+        Dim s As New NotesSession
+        Dim db As NotesDatabase
+        Set db = s.CurrentDatabase
+        
+        
+        count = 0        
+        Redim Preserve sendto(count) As String
+        sendto(count) = "Elaine Liang/TAIWAN/MXIC"
+        count = count+1
+        
+        xsbj="Multiple Case Notify Subject  : 【" +Subject +"】"        
+        xbody=mailDB.Title + " Multiple Case Notify Subject  : 【" +Subject +"】"        
+        Set maildoc=mailDB.CreateDocument
+        maildoc.sendto=sendto
+        maildoc.BlindCopyTo="Arwin Chang/TAIWAN/MXIC"
+        maildoc.CopyTo="Yorkhsu Lin/TAIWAN/MXIC"
+        maildoc.principal = mailDB.Title
+        maildoc.DisplaySent = mailDB.Title        
+        maildoc.Importance = "3"
+        maildoc.Subject = xsbj
+        maildoc.form="Memo"
+        maildoc.PostedDate=Now
+        maildoc.From=""                        
+        'maildoc.ReplyTo=Leftback(Rightback(Cdoc.txtMgrInfo(0), "("), ")")                        '--系統管理者
+        Set rt = maildoc.CreateRichTextItem("Body")
+        rt.AppendText(xbody)
+        rt.Addnewline(1)
+        rt.Addnewline(1)
+        rt.Addnewline(1)
+        If maildoc.sendto(0)<>"" Then
+                Call maildoc.Send(False)
+        End If
+        Exit Function
+        
+Errh:
+        Dim errSession As New NotesSession
+        Dim errDB As NotesDatabase
+        Set errDB=errSession.CurrentDatabase
+        
+        Dim errMailForm As New NotesDocument(errDB)        
+        Dim errLink_doc As New NotesRichTextItem(errMailForm , "Body")
+        errMailForm.Form = "Memo"
+        errMailForm.SendTo = "Yorkhsu Lin/TAIWAN/MXIC"
+        errMailForm.CopyTo = "Arwin Chang/TAIWAN/MXIC"
+        errMailForm.Subject = "("+xInBoxKey+")CmsGcmsFinalFormalAgentByMailDb \ NotifyMutiCaseToIT Error"
+        Call errLink_doc.AppendText("錯誤訊息："+Error$)
+        Call errLink_doc.AddNewline(2)
+        Call errLink_doc.AppendText("錯誤行數："+ Cstr(Erl))
+        Call errMailForm.Send(True)
+        Delete errMailForm
+        
+        Exit Function
+        
+End Function
+Sub CreateNewContractSCMS(doc As NotesDocument,tdoc As NotesDocument,hasContractFile As Integer , sourceObject As Variant , sourceObjectType As Integer)
+        On Error Goto err_handle         
+        '201911 for SCMS
+        'hasContractFile : 1 ==> has Contract File  0 ==> no Contract File
+        'sourceObjectType : 1 ==> Attahment  0 ==> "---N/A---"
+        'xSrcType="cmsfinal" '來源信箱
+        'TempDir = Environ("Temp")+"\"        
+        TempDir = "E:\APTemp\"
+        'TempDir = "c:\temp\NotesAPTemp"+"\" '
+        '<<<<NEW 201808 新增歷版契約附件表格
+        Dim contractDoc As NotesDocument
+        Dim s As New NotesSession
+        Dim db As NotesDatabase        
+        Set db = s.CurrentDatabase
+        Dim targetObject As NotesRichTextItem
+        Dim printtargetObject As NotesRichTextItem        
+        
+        Dim tmpflag As String
+        tmpflag=""
+        
+        Set contractDoc = New NotesDocument(SCMS_DB)
+        Call contractDoc.MakeResponse(doc)
+        contractDoc.Form = "ContractForm"
+        contractDoc.CreatedBy = xSrcType
+        contractDoc.CreatedByUserName = xSrcType
+        contractDoc.ContractName = doc.ContractName(0)
+        contractDoc.ContractEdition = doc.ContractEdition(0)
+        'Mail Body Append 到ContractForm
+        Dim ContractObject As New NotesRichTextItem(contractDoc , "Body")
+        Dim rtitem As NotesRichTextItem
+        Set rtitem = tdoc.GetFirstItem("Body" )
+        If Not ( rtitem Is Nothing ) Then
+                If ( rtitem.Type = RICHTEXT ) Then
+                        Call ContractObject.AppendRTItem( rtitem )
+                End If
+        End If
+        '202204 強化ContractForm 關聯性 --- Start
+        contractDoc.MailUNID = tDoc.UniversalID '信件UNID
+        contractDoc.FlowNumber = doc.FlowNumber '所屬案件編號
+        '202204 強化ContractForm 關聯性 --- End
+        Call contractDoc.Save(True , False)
+        Call CreateMonitorForm(contractDoc,doc,"SCMS") '202110 MonitorForm
+        
+        '移除原附件
+        Dim isChg As String
+        isChg="N"
+        Set rtitem = contractDoc.GetFirstItem("Body")        
+        If Not (rtitem Is Nothing ) Then
+                If Not ( Isempty(rtitem.EmbeddedObjects) ) Then
+                        Forall o In rtitem.EmbeddedObjects
+                                If (o.Type = EMBED_ATTACHMENT) Then
+                                        Call o.Remove
+                                        isChg="Y"
+                                End If
+                        End Forall
+                End If
+        End If
+        Call contractDoc.ComputeWithForm(True,False)
+        Call contractDoc.Save(True , True)
+        '<<<<<201911 for 取消判斷附件
+        Set targetObject = New NotesRichTextItem(doc,"FinalContractFile") '清除重建
+        
+        Dim settingView As NotesView
+        Dim settingProfile As NotesDocument        
+        Set settingView=GPetition_DB.GetView("vSysSetupDoc")
+        Set settingProfile=settingView.GetDocumentByKey("$fSysDoc",True)
+        Dim contract As Integer
+        If Not ( sourceObject Is Nothing ) Then
+                If ( sourceObject.Type = RICHTEXT ) Then
+                        If Not ( Isempty(sourceObject.EmbeddedObjects)) Then
+                                Set printtargetObject=doc.GetFirstItem("FinalContractFile_Auth")
+                                If printtargetObject Is Nothing Then
+                                        Set printtargetObject =  New NotesRichTextItem(doc , "FinalContractFile_Auth")
+                                End If
+                                Dim filename As String
+                                If ( sourceObject.Type = RICHTEXT ) Then
+                                        If Not ( Isempty(sourceObject.EmbeddedObjects) ) Then
+                                                For contract=0 To  Ubound(sourceObject.EmbeddedObjects)
+                                                        filename=""
+                                                        'filename = sourceObject.EmbeddedObjects(contract).Name
+                                                        filename = sourceObject.EmbeddedObjects(contract).Source 'Fix Notes 自動處理檔名 issue
+                                                        'Call sourceObject.EmbeddedObjects(contract).ExtractFile("c:\temp\NotesAPTemp"+"\"+filename)        
+                                                        Call sourceObject.EmbeddedObjects(contract).ExtractFile(TempDir+filename)        
+                                                        '??? If doc.Subsidiary(0)="MXA"  Or doc.Subsidiary(0)="MXC" Or doc.Subsidiary(0)="MXE" Or doc.Subsidiary(0)="MXHK" Or doc.Subsidiary(0)="MXK" Or doc.Subsidiary(0)="MXS" Or doc.Subsidiary(0)="MXJ" Then
+                                                        If CheckFileName(filename)="Success" Then        
+                                                                Dim readerIndex As Integer
+                                                                readerIndex=5
+                                                                Redim readerList(readerIndex) As String
+                                                                
+                                                        '>>>>>201912 Final 新增權限InfiledLawyer
+                                                                If Instr(doc.InfiledLawyer(0),"/MXIC")<> 0 Then
+                                                                        readerIndex=readerIndex+1
+                                                                        Redim Preserve readerList(readerIndex) 
+                                                                        readerList(readerIndex) =doc.InfiledLawyer(0)
+                                                                        readerIndex=readerIndex+1
+                                                                End If
+                                                        '<<<<<201912 Final 新增權限InfiledLawyer
+                                                                
+                                                                '>>>202109 新增FV 法務權限
+                                                                readerIndex=readerIndex+1
+                                                                Redim Preserve readerList(readerIndex) 
+                                                                readerList(readerIndex) =doc.FVIPLUserName(0)
+                                                                readerIndex=readerIndex+1
+                                                                '<<<202109 新增FV 法務權限
+                                                                
+                                                                '>>>202504 TrustView 加密專案: 新增G Petition 轉入內站主管名單
+                                                                If doc.Subsidiary(0) <> "MXIC" Then
+                                                                        readerIndex=readerIndex+1
+                                                                        Dim GPetitionInsideMgrs As Variant
+                                                                        GPetitionInsideMgrs = GetGPetitionInsideMgrList(doc.Subsidiary(0))
+                                                                        If GPetitionInsideMgrs(0) <> "" Then
+                                                                                For i = 0 To Ubound(GPetitionInsideMgrs)
+                                                                                        readerIndex=readerIndex+1
+                                                                                        Redim Preserve readerList(readerIndex) 
+                                                                                        readerList(readerIndex) = GPetitionInsideMgrs(i)
+                                                                                Next
+                                                                        End If
+                                                                        readerIndex=readerIndex+1
+                                                                End If
+                                                                '>>>202504 TrustView 加密專案: 新增G Petition 轉入內站主管名單
+                                                                
+                                                                readerList(0) =doc.UserName(0)
+                                                                readerList(1) ="Stacey Lee/TAIWAN/MXIC"
+                                                                If doc.Subsidiary(0)="MXA" Or doc.Subsidiary(0)="MXE" Or doc.Subsidiary(0)="MXHK" Or doc.Subsidiary(0)="MXK" Or doc.Subsidiary(0)="MXm" Or doc.Subsidiary(0)="MXS" Or doc.Subsidiary(0)="MXJ" Then
+                                                                'readerList(4) ="Sally Wang/TAIWAN/MXIC"
+                                                                        readerList(2) ="JT Chung/TAIWAN/MXIC"
+                                                                End If
+                                                                
+                                                                If Not settingProfile Is Nothing Then
+                                                                        If doc.Subsidiary(0)="MXA" Then
+                                                                                readerList(5) =Strleft(settingProfile.MXAApproverEMail(0),"@")+"/"
+                                                                        Elseif doc.Subsidiary(0)="MXE" Then
+                                                                                readerList(5) =Strleft(settingProfile.MXEApproverEMail(0),"@")+"/"
+                                                                        Elseif doc.Subsidiary(0)="MXHK" Then
+                                                                                readerList(5) =Strleft(settingProfile.MXHKApproverEMail(0),"@")+"/"
+                                                                        Elseif doc.Subsidiary(0)="MXK" Then
+                                                                                readerList(5) =Strleft(settingProfile.MXKApproverEMail(0),"@")+"/"
+                                                                        Elseif doc.Subsidiary(0)="MXS" Then 
+                                                                                readerList(5) =Strleft(settingProfile.MXSApproverEMail(0),"@")+"/"
+                                                                        Elseif doc.Subsidiary(0)="MXm" Then
+                                                                                readerList(5) =Strleft(settingProfile.MXmApproverEMail(0),"@")+"/"
+                                                                        Elseif doc.Subsidiary(0)="MXJ" Then
+                                                                                readerList(5) =Strleft(settingProfile.MXJApproverEMail(0),"@")+"/"
+                                                                        End If
+                                                                End If
+                                                                
+                                                                If Isarray(doc.IPLUserName) Then
+                                                                        For i=0 To Ubound(doc.IPLUserName)
+                                                                                readerIndex=readerIndex+1
+                                                                                Redim Preserve readerList(readerIndex) As String
+                                                                                readerList(readerIndex)=doc.IPLUserName(i)
+                                                                        Next
+                                                                Else
+                                                                        readerList(3) =doc.IPLUserName(0)
+                                                                End If
+                                                                
+                                                                If doc.ChiefMgrUserName(0)<>"" Then
+                                                                        Forall a In doc.ChiefMgrUserName
+                                                                                readerIndex=readerIndex+1
+                                                                                Redim Preserve readerList(readerIndex) As String
+                                                                                readerList(readerIndex) =Cstr(a)
+                                                                        End Forall
+                                                                End If
+                                                                
+                                                                Dim readerGroupList(1) As String
+                                                                readerGroupList(0)="VIP"
+                                                                readerGroupList(1)="CMS"
+                                                                For i=0 To Ubound(readerList)
+                                                                        Print "readerList : " + readerList(i)
+                                                                Next
+                                                                For i=0 To Ubound(readerGroupList)
+                                                                        Print "readerGroupList : " + readerGroupList(i)
+                                                                Next
+                                                                
+                                                                '>>>202109 建立暫存文件，存放已完成加密後的檔案
+                                                                Dim TmpDoc As NotesDocument
+                                                                Set TmpDoc = db.CreateDocument()
+                                                                Dim TmpObject As New NotesRichTextItem(TmpDoc , "Body")
+                                                                tmpString=embedeDSMAttachment(TempDir+filename, TmpDoc, "Body", readerList,readerGroupList,"", "", "",False)                                                                                                 
+                                                                '<<<202109 建立暫存文件，存放已完成加密後的檔案
+                                                                
+                                                                'tmpString=embedeDSMAttachment("c:\temp\NotesAPTemp"+"\"+filename, doc, "FinalContractFile", readerList,readerGroupList,"", "", "",False) 
+                                                                'tmpString=embedeDSMAttachment(TempDir+filename, contractDoc, "body", readerList,readerGroupList,"", "", "",False) 'NEW 201808 新增歷版契約附件表格
+                                                                'tmpString=embedeDSMAttachment(TempDir+filename, doc, "FinalContractFile", readerList,readerGroupList,"", "", "",False) 
+                                                                Call AppendEDSMFile(TmpDoc,"Body",contractDoc,"Body") 'SourceDoc ,SourceField,TargetDoc,TargetField '202109
+                                                                Call AppendEDSMFile(TmpDoc,"Body",doc,"FinalContractFile") 'SourceDoc ,SourceField,TargetDoc,TargetField 202109
+                                                                
+                                                                Redim readerList(0) As String
+                                                                Dim readerGroupList2(0) As String
+                                                                readerGroupList2(0)="CMSPrint"
+                                                                'tmpString=embedeDSMAttachment("c:\temp\NotesAPTemp"+"\"+filename, doc, "FinalContractFile_Auth", readerList, readerGroupList2,"ALLOWPRINTANDEDIT", "", "",False) 
+                                                                tmpString=embedeDSMAttachment(TempDir+filename, doc, "FinalContractFile_Auth", readerList, readerGroupList2,"ALLOWPRINTANDEDIT", "", "",False) 
+                                                                
+                                                        '????Else
+                                                                'Call targetObject.EmbedObject ( EMBED_ATTACHMENT, "", "c:\temp\NotesAPTemp"+"\"+filename)
+                                                                '??? Call targetObject.EmbedObject ( EMBED_ATTACHMENT, "", TempDir+filename) 'EDIT 201808 新增歷版契約附件表格
+                                                        '??? End If
+                                                        'Call targetObject.EmbedObject ( EMBED_ATTACHMENT, "", "c:\temp\NotesAPTemp"+"\"+filename)
+                                                        'Kill "c:\temp\NotesAPTemp"+"\"+filename
+                                                                
+                                                        Else
+                                                                '20220420 新增無法加密Log >>>>>>>
+                                                                'SCMS
+                                                                Dim LogStr As String
+                                                                Dim LogEngStr As String
+                                                                Dim LogItem As NotesItem
+                                                                Dim LogEngItem As NotesItem
+                                                                Set LogItem = GetItemObj(doc,"Log","")
+                                                                Set LogEngItem = GetItemObj(doc,"LogEng","")
+                                                                LogStr =  "DeployAdmin  於 " + Cstr(Cstr(Format(Now , "yyyy/mm/dd hh:nn:ss"))) + " 加密軟體無法辨識" + GetExtension(filename) + "格式，無法加密"
+                                                                LogEngStr =  "DeployAdmin can not encrypt The file format of " + GetExtension(filename) + " at " + Cstr(Cstr(Format(Now , "yyyy/mm/dd hh:nn:ss")))
+                                                                Call LogItem.AppendToTextList(LogStr)
+                                                                Call LogEngItem.AppendToTextList(LogEngStr)
+                                                                Call doc.Save(True , True)
+                                                                '20220420 新增無法加密Log <<<<<<<<
+                                                                
+                                                                Call targetObject.EmbedObject(EMBED_ATTACHMENT, "", TempDir+filename)
+                                                                Call printtargetObject.EmbedObject(EMBED_ATTACHMENT, "", TempDir+filename)
+                                                                Set rtitem = contractDoc.GetFirstItem("Body")
+                                                                Call rtitem.EmbedObject(EMBED_ATTACHMENT, "", TempDir+filename)
+                                                                If tmpflag="" Then
+                                                                        tmpflag=filename
+                                                                Else
+                                                                        tmpflag=tmpflag+"、"+filename
+                                                                End If
+                                                        End If
+                                                        
+                                                        '2021Fix 簡體字刪除
+                                                        If Dir(TempDir+filename) <> "" Then
+                                                                Kill TempDir+filename '201808 新增歷版契約附件表格 
+                                                        Else
+                                                                Call KillSimpleFile(TempDir+filename)
+                                                        End If
+                                                        
+                                                Next        
+                                                If tmpflag<>"" Then
+                                                        If doc.UserName(0)<>"" Then
+                                                                Call SendFomatErrorNotify(tmpflag,tdoc.subject(0),doc.UserName(0))
+                                                        End If
+                                                End If
+                                                '>>>>201808 新增歷版契約附件表格
+                                                Call contractDoc.ComputeWithForm(True,False)
+                                                Call contractDoc.Save(True , True)
+                                                '201808 新增歷版契約附件表格
+                                        End If
+                                End If
+                        End If
+                End If
+        End If
+        
+        '>>>>NEW 201808 新增歷版契約附件表格 
+        Dim docLink As Variant
+        Dim tmpItem As NotesItem
+        Dim tmpEngItem As NotesItem
+        If Not ( contractDoc Is Nothing ) Then
+                Set tmpItem = doc.GetFirstItem("ContractLogDate")
+                Call tmpItem.AppendToTextList(Format(Now,"yyyy/mm/dd HH:MM:SS"))        'for Req. HA900168
+                Set tmpItem = doc.GetFirstItem("ContractLogModifier")
+                Set tmpEngItem = doc.GetFirstItem("ContractLogModifierUserName")
+                
+                Call tmpItem.AppendToTextList(xSrcType)
+                If Not tmpEngItem Is Nothing Then
+                        Call tmpEngItem.AppendToTextList(xSrcType)
+                End If
+                
+                Set tmpItem = doc.GetFirstItem("ContractLogVersion")
+                Call tmpItem.AppendToTextList("V " + Cstr(Format(doc.ContractEdition(0) , "###.0")))
+                Set tmpItem = doc.GetFirstItem("ContractLogList")
+                Call tmpItem.AppendToTextList(Cstr(contractDoc.UniversalID))
+                doc.NewestUID = contractDoc.UniversalID
+                doc.ContractEdition = doc.ContractEdition(0) + 1
+                doc.HasContractVersion = 1
+                doc.ContractFlag = 0
+                Call doc.Save(True , True)
+        End If
+        '<<<<NEW 201808 新增歷版契約附件表格
+        
+        Exit Sub        
+        
+err_handle:
+        Dim errSession As New NotesSession
+        Dim errDB As NotesDatabase
+        Set errDB=errSession.CurrentDatabase
+        
+        Dim errMailForm As New NotesDocument(errDB)
+        Dim errLink_doc As New NotesRichTextItem(errMailForm , "Body")
+        errMailForm.Form = "Memo"
+        errMailForm.SendTo = "Yorkhsu Lin/TAIWAN/MXIC"
+        errMailForm.CopyTo = "Arwin Chang/TAIWAN/MXIC"
+        errMailForm.Subject = "("+xInBoxKey+")CmsGcmsFinalFormalAgentByMailDb \ CreateNewContractSCMS Error"
+        Call errLink_doc.AppendText("錯誤訊息："+Error$)
+        Call errLink_doc.AddNewline(2)
+        Call errLink_doc.AppendText("錯誤行數："+ Cstr(Erl))
+        Call errLink_doc.AddNewline(2)
+        'Resume Next 
+        Call errMailForm.Send(False)
+        Exit Sub
+End Sub
+Function GetExtension (fileName As String ) As String
+'回傳副檔名
+        GetExtension = ""
+        Dim result As Variant
+        result = Split(fileName, ".")        
+        GetExtension=result(Ubound(result))        
+End Function
+Function CheckFileName(FileName As String)As String
+        On Error Goto err_handle                 
+        
+        Dim result As Variant
+        result = Split(fileName, ".")
+        Dim tmpFileName As String
+        '20250623 法務開放所有TrustView 可加密附檔 ----- Fix Start
+        Dim session As New NotesSession
+        Dim db As NotesDatabase
+        Set db = session.Currentdatabase
+        Dim xView As NotesView,SetupDoc As NotesDocument
+        Dim ExtNames As Variant
+        Set xView = db.Getview(|SystemSetup|)
+        Set SetupDoc = xView.Getdocumentbykey(|fSystemSetup|,True)        
+        ExtNames = FullTrim(SetupDoc.CanEncrypt_ExtNameList)                
+        'tmpFileName=Ucase(result(Ubound(result)))
+        tmpFileName=Lcase(result(UBound(result)))
+        'If Ucase(tmpFileName)="DOC" Or Ucase(tmpFileName)="DOCX" Or Ucase(tmpFileName)="XLS" Or Ucase(tmpFileName)="XLSX" Or Ucase(tmpFileName)="PPT"  Or Ucase(tmpFileName)="PPTX"  Or Ucase(tmpFileName)="PDF" Then
+        If Not IsNull(ArrayGetIndex(ExtNames,tmpFileName)) Then
+        '20250623 法務開放所有TrustView 可加密附檔 ----- Fix End
+                CheckFileName="Success"
+        Else
+                CheckFileName="Fail"
+        End If
+        Exit Function        
+        
+err_handle:
+        Dim errSession As New NotesSession
+        Dim errDB As NotesDatabase
+        Set errDB=errSession.CurrentDatabase        
+        Dim errMailForm As New NotesDocument(errDB)        
+        Dim errLink_doc As New NotesRichTextItem(errMailForm , "Body")
+        errMailForm.Form = "Memo"
+        errMailForm.SendTo = "Yorkhsu Lin/TAIWAN/MXIC"
+        errMailForm.CopyTo = "Arwin Chang/TAIWAN/MXIC"
+        errMailForm.Subject = "("+xInBoxKey+")CmsGcmsFinalFormalAgentByMailDb \ CheckFileName Error"
+        Call errLink_doc.AppendText("錯誤訊息："+Error$)
+        Call errLink_doc.AddNewline(2)
+        Call errLink_doc.AppendText("錯誤行數："+ Cstr(Erl))
+        Call errLink_doc.AddNewline(2)
+        Call errMailForm.Send(False)
+        Exit Function
+End Function
+Function CheckMailFrom(maildoc As NotesDocument,FromName As String)As String
+        On Error Goto err_handle         
+        Dim s As New NotesSession
+        Dim mailName As NotesName        
+        Dim docFMProfile As NotesDocument        
+        Dim empdoc As NotesDocument        
+        Dim db As NotesDatabase
+        Dim view As NotesView
+        Set db = CMS_DB        
+        Set mailName =New NotesName(FromName)
+        
+        Set docFMProfile = db.GetProfileDocument("FMProfile")        
+        Dim Emp_DB As New NotesDatabase(docFMProfile.EmpDBServer(0) , docFMProfile.EmpDBFilePath(0))
+        Set view=Emp_DB.GetView("byUserName")        
+        
+        CheckMailFrom=""
+        
+        If FromName="Stacey.Lee@bakermckenzie.com" Then
+                CheckMailFrom="Y"
+                Exit Function        
+        End If
+        
+        If mailName.Abbreviated="DeployAdmin/TAIWAN/MXIC" Then
+                If Maildoc.ExecuteBy(0)="" Then
+                Else
+                        CheckMailFrom="Y"
+                        Exit Function        
+                End If                
+        End If
+        
+        If FromName="CN=Stacey Lee/OU=TAIWAN/O=MXIC" Then
+                CheckMailFrom="Y"
+                Exit Function        
+        End If
+        'Set empdoc=view.GetDocumentByKey(mailName.Abbreviated,True)
+        'If Not empdoc Is Nothing Then
+        '        If empdoc.divisionNo(0)="K0500" Or empdoc.divisionNo(0)="MR230" Then
+        '                CheckMailFrom="Y"
+        '        Else
+        '                CheckMailFrom="N"
+        '        End If
+        'Else
+        '        Call NotifyError(maildoc,"CMSstandardfinal找不到寄件人相關部門。")
+        'End If
+        Exit Function        
+        
+err_handle:
+        Dim errSession As New NotesSession
+        Dim errDB As NotesDatabase
+        Set errDB=errSession.CurrentDatabase        
+        Dim errMailForm As New NotesDocument(errDB)        
+        Dim errLink_doc As New NotesRichTextItem(errMailForm , "Body")
+        errMailForm.Form = "Memo"
+        errMailForm.SendTo = "Yorkhsu Lin/TAIWAN/MXIC"
+        errMailForm.CopyTo = "Arwin Chang/TAIWAN/MXIC"
+        errMailForm.Subject = "("+xInBoxKey+")CmsGcmsFinalFormalAgentByMailDb \ CheckMailFrom Error"        
+        Call errLink_doc.AppendText("錯誤訊息："+Error$)
+        Call errLink_doc.AddNewline(2)
+        Call errLink_doc.AppendText("錯誤行數："+ Cstr(Erl))
+        Call errLink_doc.AddNewline(2)
+        Call errMailForm.Send(False)
+        Exit Function
+End Function
+Sub ProcessAttachment(doc As NotesDocument,tdoc As NotesDocument)
+        On Error Goto err_handle         
+        '判斷是否有新插入之合約檔案
+        Dim contractObjectCount As Integer
+        
+        Set sourceObject = tdoc.GetFirstItem("Body")        
+        
+        contractObjectCount = 0
+        If Not ( sourceObject Is Nothing ) Then
+                If Not ( Isempty(sourceObject.EmbeddedObjects) ) Then
+                        Forall contract In sourceObject.EmbeddedObjects
+                                contractObjectCount = contractObjectCount + 1
+                        End Forall
+                End If
+        End If
+        
+        Select Case contractObjectCount
+        Case 0 : '沒有新插入之合約檔案
+                Call CreateNewContract(doc,tdoc,0 , sourceObject , 1) '201911 for 取消判斷附件
+        Case Else : 
+                Call CreateNewContract(doc,tdoc,1 , sourceObject , 1) '有新插入合約檔案
+        End Select
+        
+        Call doc.Save(True , True)
+        Exit Sub        
+        
+err_handle:
+        Dim errSession As New NotesSession
+        Dim errDB As NotesDatabase
+        Set errDB=errSession.CurrentDatabase
+        
+        Dim errMailForm As New NotesDocument(errDB)        
+        Dim errLink_doc As New NotesRichTextItem(errMailForm , "Body")
+        errMailForm.Form = "Memo"
+        errMailForm.SendTo = "Yorkhsu Lin/TAIWAN/MXIC"
+        errMailForm.CopyTo = "Arwin Chang/TAIWAN/MXIC"
+        errMailForm.Subject = "("+xInBoxKey+")CmsGcmsFinalFormalAgentByMailDb \ ProcessAttachment Error"
+        Call errLink_doc.AppendText("錯誤訊息："+Error$)
+        Call errLink_doc.AddNewline(2)
+        Call errLink_doc.AppendText("錯誤行數："+ Cstr(Erl))
+        Call errLink_doc.AddNewline(2)
+        
+        Call errMailForm.Send(False)
+        Exit Sub
+End Sub
+Function FillAuthContractFinalName(Doc As notesdocument)As String        
+        On Error Goto err_handle
+        Dim sessionA As New NotesSession
+        Dim dbA As NotesDatabase        
+        Set dbA = sessionA.CurrentDatabase                
+        Dim filename2 As String
+        filename2=""
+        Dim sourceObject2 As NotesRichTextItem        
+        Dim tmpAuthcontractname As NotesItem                
+        If doc.HasItem( "ContractAuthFinallyName" ) Then '201911 for SCMS
+                Set tmpAuthcontractname = doc.GetFirstItem("ContractAuthFinallyName")
+        Else '201911 for SCMS
+                Set  tmpAuthcontractname=  New NotesRichTextItem(doc , "ContractAuthFinallyName") '201911 for SCMS
+        End If '201911 for SCMS        
+        Dim Authcontract As Integer        
+        Dim xitem As NotesItem
+        If doc.HasItem( "FinalContractFile_Auth" ) Then
+                Set xitem=doc.GetFirstItem("FinalContractFile_Auth")
+                If (  xitem.Type = RICHTEXT ) Then
+                        Set sourceObject2 = doc.GetFirstItem("FinalContractFile_Auth")
+                Else
+                        Call xitem.Remove()
+                        Set sourceObject2=  New NotesRichTextItem(doc , "FinalContractFile_Auth")        
+                        
+                End If
+        Else
+                Set sourceObject2=  New NotesRichTextItem(doc , "FinalContractFile_Auth")                                        
+        End If
+        If ( sourceObject2.Type = RICHTEXT ) Then
+                If Not ( Isempty(sourceObject2.EmbeddedObjects) ) Then                
+                        tmpAuthcontractname.Values=""
+                        For Authcontract=0 To  Ubound(sourceObject2.EmbeddedObjects)
+                                filename2 =""
+                                filename2 = sourceObject2.EmbeddedObjects(Authcontract).Source
+                                Call tmpAuthcontractname.AppendToTextList(filename2)
+                        Next
+                        Call doc.Save(True,True)
+                End If
+        End If        
+        Exit Function        
+        
+err_handle:
+        Dim errSession As New NotesSession
+        Dim errDB As NotesDatabase
+        Set errDB=errSession.CurrentDatabase        
+        Dim errMailForm As New NotesDocument(errDB)        
+        Dim errLink_doc As New NotesRichTextItem(errMailForm , "Body")
+        errMailForm.Form = "Memo"
+        errMailForm.SendTo = "Yorkhsu Lin/TAIWAN/MXIC"
+        errMailForm.CopyTo = "Arwin Chang/TAIWAN/MXIC"
+        errMailForm.Subject = "("+xInBoxKey+")CmsGcmsFinalFormalAgentByMailDb \ FillAuthContractFinalName Error"
+        Call errLink_doc.AppendText("錯誤訊息："+Error$)
+        Call errLink_doc.AddNewline(2)
+        Call errLink_doc.AppendText("錯誤行數："+ Cstr(Erl))
+        Call errLink_doc.AddNewline(2)
+        Call errMailForm.Send(False)
+        Exit Function
+End Function
+Function CheckFVLegal(maildoc As NotesDocument,FromName As String,tmpsubject As String)As String
+        On Error Goto err_handle         
+        Dim s As New NotesSession
+        Dim mailName As NotesName        
+        
+        Dim marco As Variant
+        Dim view As NotesView
+        Dim oview As NotesView
+        Dim doc As NotesDocument
+        Dim cmsdb As NotesDatabase
+        Dim gcmsdb As NotesDatabase
+        
+        Set db = s.CurrentDatabase
+        Set cmsdb=CMS_DB        
+        Set gcmsdb=GCMS_DB
+        
+'        If Ucase$(Left(tmpSubject,2))="SG" Or Ucase$(Left(tmpSubject,1))="G"  Or Ucase$(Left(tmpSubject,1))="S" Or Ucase$(Left(tmpSubject,1))="A" Or Ucase$(Left(tmpSubject,1))="C" Or Ucase$(Left(tmpSubject,1))="D" Or Ucase$(Left(tmpSubject,5))="MXICG"  Or Ucase$(Left(tmpSubject,5))="MXICS" Then '一般契約
+        If xFormType="CMS" Then        
+                'Set view=cmsdb.GetView("ApplyFlowNo")
+                Set view=cmsdb.GetView("ApplyFlowNo_ALL") ' 2022/10 新舊案號皆需處理(用印)
+                Set doc=view.GetDocumentByKey(tmpSubject,True)        
+                If doc Is Nothing Then
+                        'Set oview = cmsdb.GetView("MainFormalFlowNoAll")
+                        Set oview = cmsdb.GetView("MainFormalFlowNoAll_ALL") ' 2022/10 新舊案號皆需處理(審閱)
+                        Set doc = oview.GetDocumentByKey(tmpSubject)
+                        If  doc Is Nothing Then
+                                CheckFVLegal="N"
+                                Exit Function
+                        End If
+                End If
+'        Elseif Ucase$(Left(Right(tmpSubject,4),1))="G" Or Ucase$(Right(Left(tmpSubject,4),1))="G" Or Ucase$(Right(Left(tmpSubject,4),1))="A" Or Ucase$(Right(Left(tmpSubject,4),1))="S" Or Ucase$(Left(Right(tmpSubject,4),1))="S" Or Ucase$(Right(Left(tmpSubject,4),1))="C" Or Ucase$(Right(Left(tmpSubject,4),1))="D" Then 'Or Ucase$(Left(tmpSubject,1))="I" )Then        'Gcms Case
+        Elseif xFormType="GCMS" Then        
+                'Set view=gcmsdb.GetView("GTDocNoFinalForMailCheck")
+                Set view=gcmsdb.GetView("GTDocNoFinalForMailCheck_ALL") ' 2022/10 新舊案號皆需處理(GCMS ALL)
+                Set doc=view.GetDocumentByKey(tmpSubject,True)        
+                If doc Is Nothing Then
+                        CheckFVLegal="N"
+                        Exit Function
+                End If
+        Else
+                CheckFVLegal="N"
+                Exit Function
+        End If
+        
+        Set mailName =New NotesName(FromName)
+        
+        If FromName="Stacey.Lee@bakermckenzie.com" Then
+                CheckFVLegal="Y"
+                Exit Function        
+        End If
+        
+        If FromName="CN=Stacey Lee/OU=TAIWAN/O=MXIC" Then
+                CheckFVLegal="Y"
+                Exit Function        
+        End If
+        If doc.FVIPLUserName(0)="" Then
+                CheckFVLegal="N"
+                Exit Function        
+        End If
+        marco=Evaluate(|@Contains("|+mailName.Canonical+|";@Name([CN];FVIPLUserName));|,doc)
+        
+        If marco(0) Then                
+                CheckFVLegal="Y"                        
+        Else
+                CheckFVLegal="N"                        
+        End If
+        Exit Function        
+        
+err_handle:
+        Dim errSession As New NotesSession
+        Dim errDB As NotesDatabase
+        Set errDB=errSession.CurrentDatabase        
+        Dim errMailForm As New NotesDocument(errDB)        
+        Dim errLink_doc As New NotesRichTextItem(errMailForm , "Body")
+        errMailForm.Form = "Memo"
+        errMailForm.SendTo = "Yorkhsu Lin/TAIWAN/MXIC"
+        errMailForm.CopyTo = "Arwin Chang/TAIWAN/MXIC"
+        errMailForm.Subject = "("+xInBoxKey+")CmsGcmsFinalFormalAgentByMailDb \ CheckFVLegal Error"
+        Call errLink_doc.AppendText("錯誤訊息："+Error$)
+        Call errLink_doc.AddNewline(2)
+        Call errLink_doc.AppendText("錯誤行數："+ Cstr(Erl))
+        Call errLink_doc.AddNewline(2)
+        Call errMailForm.Send(False)
+        Exit Function
+End Function
+Sub KillSimpleFile(fullFilePath As String)
+        '2021Fix 處理簡體字檔案刪除
+        Dim fso, f2  '(Variant 型態)
+        
+        Set fso = CreateObject("Scripting.FileSystemObject")                 
+        If fso.FileExists(fullFilePath) Then
+                Set f2 = fso.GetFile(fullFilePath) 
+                f2.Delete  ' 刪除文件。 
+        End If
+End Sub
+%REM
+        Function getSubjectFormTypeV2
+        Description: 直接到三個系統找FlowNumber 案件，判斷來源系統
+%END REM
+Function getSubjectFormType(tmpSubject As String) As String
+        getSubjectFormType = ""
+        Dim checkView As NotesView
+        
+        'Search CMS
+        Set checkView = CMS_DB.GetView("ApplyFlowNo_ALL") '用印
+        Set caseDoc = checkView.Getdocumentbykey(tmpSubject, True)
+        If Not caseDoc Is Nothing Then
+                getSubjectFormType = "CMS"
+                Exit Function
+        Else
+                Set checkView = CMS_DB.GetView("MainFormalFlowNoAll_ALL") '審閱All
+                Set caseDoc = checkView.Getdocumentbykey(tmpSubject, True)
+                If Not caseDoc Is Nothing Then
+                        getSubjectFormType = "CMS"
+                        Exit Function
+                End If
+        End If
+                
+        'Search SCMS
+        Set checkView = SCMS_DB.GetView("ApplyFlowNo") 'SCMS View
+        Set caseDoc = checkView.Getdocumentbykey(tmpSubject, True)
+        If Not caseDoc Is Nothing Then
+                getSubjectFormType = "SCMS"
+                Exit Function
+        End If
+        
+        'Search GCMS
+        Set checkView = GCMS_DB.GetView("GTDocNoFinalForMailCheck_ALL") 'GCMS All
+        Set caseDoc = checkView.Getdocumentbykey(tmpSubject, True)
+        If Not caseDoc Is Nothing Then
+                getSubjectFormType = "GCMS"
+                Exit Function
+        End If        
+End Function
+Function GetChiName(Doc As notesdocument, AbbUserName As String)As String
+        Dim ss As New notessession
+        Dim uidoc As notesuidocument
+        Dim db As notesdatabase
+        Dim empDB As NotesDatabase
+        Dim empView As notesview, empView2 As notesview
+        Dim empDoc As notesdocument
+        Dim UserName As New NOTESNAME(ss.UserName)
+        Dim tDoc As notesdocument
+        Set db=ss.currentdatabase
+        Set empdb=New notesdatabase("TWAPPN01/TAIWAN/MXIC","fm\employee.nsf")
+        Set empview=empdb.getview("byUserName")
+        Set empView2=empdb.getview("EmpnoView")
+        Set tDoc=empview.getdocumentbykey(AbbUserName)
+        Dim tmpDept As String
+        If Not(tDoc Is Nothing) Then
+                tmpDept=Cstr(tdoc.divisionNo(0))+":"+tDoc.employeeName(0)
+                GetChiName= tmpDept
+        End If
+End Function
+Sub AppendEDSMFile(SourceDoc As NotesDocument,  SourceField As String ,TargetDoc As NotesDocument , TargetField As String)
+'將加密文件Append 到對應文件的欄位中
+        On Error Goto err_handle
+        Dim sourceRT As NotesRichTextItem
+        Dim TargetRT As NotesRichTextItem
+        Dim fso, f2  '(Variant 型態) '2021 Fix
+        Set fso = CreateObject("Scripting.FileSystemObject")
+        
+        Set sourceRT = SourceDoc.GetFirstItem(SourceField)
+        Set TargetRT = TargetDoc.GetFirstItem(TargetField)
+        TempDir =  "E:\APTemp\"
+        If Not (sourceRT Is Nothing ) Then
+                If Not ( Isempty(sourceRT.EmbeddedObjects) ) Then
+                        For i=0 To  Ubound(sourceRT.EmbeddedObjects)
+                                filename = sourceRT.EmbeddedObjects(i).Source
+                                Call sourceRT.EmbeddedObjects(i).ExtractFile(TempDir+filename)
+                                If Not (TargetRT Is Nothing) Then
+                                        Call TargetRT.EmbedObject(EMBED_ATTACHMENT, "", TempDir+filename)
+                                        Call TargetRT.AddNewLine(1)
+                                End If                                
+                                If  fso.FileExists(TempDir+filename) Then
+                                        Print "Kill" + TempDir+filename                
+                                        Set f2 = fso.GetFile(TempDir+filename)
+                                        f2.Delete
+                                End If                                 
+                        Next                                                
+                End If
+        End If
+        
+        Exit Sub
+err_handle:
+        Dim errSession As New NotesSession
+        Dim errDB As NotesDatabase
+        Set errDB=errSession.CurrentDatabase        
+        Dim errMailForm As New NotesDocument(errDB)        
+        Dim errLink_doc As New NotesRichTextItem(errMailForm , "Body")
+        errMailForm.Form = "Memo"
+        errMailForm.SendTo = "Yorkhsu Lin/TAIWAN/MXIC"
+        errMailForm.CopyTo = "Arwin Chang/TAIWAN/MXIC"
+        errMailForm.Subject = "("+xInBoxKey+")CmsGcmsFinalFormalAgentByMailDb \ AppendEDSMFile Error"
+        Call errLink_doc.AppendText("錯誤訊息："+Error$)
+        Call errLink_doc.AddNewline(2)
+        Call errLink_doc.AppendText("錯誤行數："+ Cstr(Erl))
+        Call errLink_doc.AddNewline(2)
+        Call errMailForm.Send(False)
+        Exit Sub
+End Sub
+Sub copyRT(doc As NotesDocument, newDoc As NotesDocument, fieldName As String, rt As NotesRichTextItem)
+        Dim s As New NotesSession
+        Dim db As NotesDatabase
+        Set db=s.CurrentDatabase
+        
+        If doc.HasItem(fieldName) Then
+                Dim oldRT As NotesRichTextItem
+                
+                Set oldRT=doc.GetFirstItem(fieldName)
+                If oldRT.Type=RICHTEXT Then
+                        Call RT.AppendRTItem(oldRT)
+                Else
+                        Call RT.AppendText(oldRT.text)
+                End If                                
+        End If
+        
+End Sub
+Sub SendFomatErrorNotify(FileName As String,subject As String,xsendto As Variant)
+        Dim s As New NotesSession
+        Dim db As NotesDatabase
+        Set db=s.CurrentDatabase
+        ' 發信通知
+        Dim NoticeMailForm As New NotesDocument(db)        
+        Dim Notice_doc As New NotesRichTextItem(NoticeMailForm , "Body")
+        
+        Dim blindCopyTo(2) As String
+        blindCopyTo(0) ="Elaine Liang/TAIWAN/MXIC"
+        blindCopyTo(1) ="Arwin Chang/TAIWAN/MXIC"
+        blindCopyTo(2) ="Yorkhsu Lin/TAIWAN/MXIC"
+        
+        '錯誤訊息
+        errMesg="加密軟體無法辨識此檔案( "+FileName+" )之格式，故無法加密，已保留原始最終版"+Chr(13)
+        errMesg = errMesg+"The file format of "+FileName+" can not be recognized by the encryption software and failed to be encrypted. The original final version is retained"
+        
+        NoticeMailForm.Form = "Memo"
+        NoticeMailForm.SendTo = xsendto
+        NoticeMailForm.CopyTo = ""
+        NoticeMailForm.BlindCopyTo = blindCopyTo
+        NoticeMailForm.Subject =  subject
+        Call Notice_doc.AppendText("Dear Sir,")
+        Call Notice_doc.AddNewline(2)
+        Call Notice_doc.AppendText(errMesg)
+        Call Notice_doc.AddNewline(2)
+        Call NoticeMailForm.Send(False)
+        Delete NoticeMailForm
+        
+End Sub
+Function getChiefMgrUserNameByDoc(doc As NotesDocument,xFormType As String) As Variant
+        '取主辦人主管至BU Head                
+        'xFormType : CMS,GCMS,SCMS
+        getChiefMgrUserNameByDoc=""
+        If xFormType="SCMS" Then Exit Function
+        If xFormType="GCMS" Then Exit Function
+        If xFormType="CMS" Then
+                If doc.Form(0)="ApplyForm" Or doc.Form(0)="ApplyForm1" Then
+                        Dim cview As NotesView
+                        Dim cdoc As NotesDocument
+                        Set cview=doc.ParentDatabase.GetView("MainFormalFlowNoAll_ALL")
+                        Set cdoc=cview.GetDocumentByKey(doc.FlowNumber(0),True)
+                        If Not(cdoc Is Nothing) Then
+                                getChiefMgrUserNameByDoc=cdoc.ChiefMgrUserName
+                        End If
+                Else
+                        getChiefMgrUserNameByDoc=doc.ChiefMgrUserName
+                End If
+        End If        
+End Function
