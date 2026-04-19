@@ -1,1 +1,135 @@
-
+Sub sbCreateContractVerListByDoc(doc As NotesDocument)
+	On Error Goto errh
+	
+	Dim xUNID As String
+	Dim xVer As String
+	
+	Dim tmpItm As NotesItem
+	Dim tmpItm_cmsinbox As NotesItem
+	Dim tmpItm_cmsinboxp As NotesItem
+	Dim tmpItm_cmsreply As NotesItem
+	Dim tmpItm_cmsreplyp As NotesItem
+	Dim tmpItm_cmscounterparty As NotesItem
+	Dim tmpItm_cmspetition As NotesItem
+	Dim tmpItm_cmsfinal As NotesItem	
+	Dim tmpItm_cmsfpetition As NotesItem
+	Dim tmpItm_cmsauto As NotesItem	 '201907 cmsauto
+	Dim tmpItm_cmsautop As NotesItem	 '201907 cmsautop
+	Dim tmpItm_cmsmapping As NotesItem	 '202310 cmsmapping
+	doc.tmpList_cmsinbox=""
+	doc.tmpList_cmsinboxp=""
+	doc.tmpList_cmsreply=""
+	doc.tmpList_cmsreplyp=""
+	doc.tmpList_cmscounterparty=""
+	doc.tmpList_cmspetition=""
+	doc.tmpList_cmsfinal=""
+	doc.tmpList_cmsfpetition=""
+	doc.tmpList_cmsauto="" '201907 cmsauto
+	doc.tmpList_cmsautop="" '201907 cmsautop
+	doc.tmpList_cmsmapping=""  '202310 cmsmapping
+	Set tmpItm_cmsinbox=doc.GetFirstItem("tmpList_cmsinbox")
+	Set tmpItm_cmsinboxp=doc.GetFirstItem("tmpList_cmsinboxp")
+	Set tmpItm_cmsreply=doc.GetFirstItem("tmpList_cmsreply")
+	Set tmpItm_cmsreplyp=doc.GetFirstItem("tmpList_cmsreplyp")
+	Set tmpItm_cmscounterparty=doc.GetFirstItem("tmpList_cmscounterparty")
+	Set tmpItm_cmspetition=doc.GetFirstItem("tmpList_cmspetition")
+	Set tmpItm_cmsfinal=doc.GetFirstItem("tmpList_cmsfinal")
+	Set tmpItm_cmsfpetition=doc.GetFirstItem("tmpList_cmsfpetition")
+	Set tmpItm_cmsauto=doc.GetFirstItem("tmpList_cmsauto")  '201907 cmsauto
+	Set tmpItm_cmsautop=doc.GetFirstItem("tmpList_cmsautop")  '201907 cmsautop
+	Set tmpItm_cmsmapping =  doc.GetFirstItem("tmpList_cmsmapping")  '202310 cmsmapping
+	'>>>>>202011 G或A類 送件產生歷版契約附件改到 counterparty 顯示
+	If doc.ContractLogModifierCPV0(0)<>"" Then
+		'先畫counterparty V0
+		Dim mm As Integer
+		mm=Ubound(doc.ContractLogModifierCPV0)
+		'Date^Modifier^Ver^UNID
+		Call tmpItm_cmscounterparty.AppendToTextList(doc.ContractLogDateCPV0(mm)+"^"+doc.ContractLogModifierCPV0(mm)+"^"+doc.ContractLogVersionCPV0(mm)+"^"+doc.ContractLogListCPV0(mm))
+	End If
+	 '<<<<<202011
+	For i=0 To Ubound(doc.ContractLogModifier)
+		If doc.ContractLogModifier(i)="cmsinbox" Then
+			Set tmpItm=tmpItm_cmsinbox
+		Elseif doc.ContractLogModifier(i)="cmsinboxp" Then
+			Set tmpItm=tmpItm_cmsinboxp
+		Elseif doc.ContractLogModifier(i)="cmsreply" Then
+			Set tmpItm=tmpItm_cmsreply
+		Elseif doc.ContractLogModifier(i)="cmsreplyp" Then
+			Set tmpItm=tmpItm_cmsreplyp
+		Elseif doc.ContractLogModifier(i)="cmscounterparty" Then
+			Set tmpItm=tmpItm_cmscounterparty
+		Elseif doc.ContractLogModifier(i)="cmspetition" Then
+			Set tmpItm=tmpItm_cmspetition
+		Elseif doc.ContractLogModifier(i)="cmsfinal" Then
+			Set tmpItm=tmpItm_cmsfinal
+		Elseif doc.ContractLogModifier(i)="cmsfpetition" Then
+			Set tmpItm=tmpItm_cmsfpetition
+			'Auto Mapping 作業強化
+			'Auto/Autop 合併顯示於Mapping 結果頁籤	
+		Elseif doc.ContractLogModifier(i)="cmsauto" Or doc.ContractLogModifier(i)="cmsautop" Then  '201907 cmsauto
+			Set tmpItm=tmpItm_cmsauto  '201907 cmsauto
+		'Elseif doc.ContractLogModifier(i)="cmsautop" Then  '201907 cmsautop
+		'	Set tmpItm=tmpItm_cmsautop  '201907 cmsautop
+		Elseif doc.ContractLogModifier(i)="cmsmapping" Then  '202310 cmsmapping
+			Set tmpItm=tmpItm_cmsmapping  '202310 cmsmapping
+		Else
+			 '>>>>>202011 G或A類 送件產生歷版契約附件改到 counterparty 顯示
+			If Right(doc.ContractLogModifier(i),1)="_" Then '排除含_ : counterparty V0
+				Set tmpItm=Nothing
+			Else
+				'2021/08/04 Fix CounterParty 重新繪製於Reply問題
+				If doc.ContractLogModifierCPV0(0) <> "" Then
+					Set tmpItm=Nothing				
+				Else
+					Set tmpItm=tmpItm_cmsreply	
+				End If
+				
+			 '<<<<<202011
+				
+			End If	'202011
+		End If
+		If Not(tmpItm Is Nothing) Then '202011
+			'Date^Modifier^Ver^UNID
+			If doc.ContractLogModifier(i)<>"" Then  '202011
+				Call tmpItm.AppendToTextList(doc.ContractLogDate(i)+"^"+doc.ContractLogModifier(i)+"^"+doc.ContractLogVersion(i)+"^"+doc.ContractLogList(i))
+			End If  '202011
+		End If '202011
+	Next
+	'doc.CCVType="cmscounterparty" '??????????	
+	Call fnCreateContractVerList(doc,tmpItm_cmsinbox,"cmsinbox")
+	Call fnCreateContractVerList(doc,tmpItm_cmsinboxp,"cmsinboxp")
+	Call fnCreateContractVerList(doc,tmpItm_cmsreply,"cmsreply")
+	Call fnCreateContractVerList(doc,tmpItm_cmsreplyp,"cmsreplyp")
+	Call fnCreateContractVerList(doc,tmpItm_cmscounterparty,"cmscounterparty")
+	Call fnCreateContractVerList(doc,tmpItm_cmspetition,"cmspetition")
+	Call fnCreateContractVerList(doc,tmpItm_cmsfinal,"cmsfinal")
+	Call fnCreateContractVerList(doc,tmpItm_cmsfpetition,"cmsfpetition")
+	Call fnCreateContractVerList(doc,tmpItm_cmsauto,"cmsauto")  '201907 cmsauto
+	Call fnCreateContractVerList(doc,tmpItm_cmsautop,"cmsautop")  '201907 cmsautop
+	Call fnCreateContractVerList(doc,tmpItm_cmsmapping,"cmsmapping")  '202310 cmsmapping
+	doc.CCVType=""
+	doc.CCVDspType="RTF"
+	Call doc.Save(True,False)
+	
+	Exit Sub	
+errh:
+	Dim errSession As New NotesSession
+	Dim errDB As NotesDatabase
+	Set errDB=errSession.CurrentDatabase
+	
+	Dim errMailForm As New NotesDocument(errDB)	
+	Dim errLink_doc As New NotesRichTextItem(errMailForm , "Body")
+	errMailForm.Form = "Memo"
+	errMailForm.SendTo = "Arwin Chang/TAIWAN/MXIC"
+	errMailForm.CopyTo = "Yorkhsu Lin/TAIWAN/MXIC"
+	errMailForm.Subject = "CMS  agCreateContractVerList 發生錯誤"
+	Call errLink_doc.AppendText("錯誤訊息："+Error$)
+	Call errLink_doc.AddNewline(2)
+	Call errLink_doc.AppendText("錯誤行數："+ Cstr(Erl))
+	Call errLink_doc.AddNewline(2)
+	Call errLink_doc.AppendText("Link->")
+	Call errLink_doc.AppendDocLink(doc,"Link")
+	Call errMailForm.Send(True)
+	Delete errMailForm
+	Exit Sub
+End Sub
