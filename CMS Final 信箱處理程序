@@ -1,1 +1,465 @@
+Option Public
 
+
+
+
+
+
+Private cursession As NotesSession
+Private curdb As NotesDatabase
+Private mailDB As NotesDatabase
+Private dummydoc As NotesDocument
+Sub Initialize
+        On Error Goto err_handle
+        Dim DBProfile As NotesDocument
+        Set cursession=New NotesSession
+        Set curdb = cursession.CurrentDatabase        
+        Set DBProfile = curdb.Getprofiledocument("DBInfo Profile")
+        Set CMS_DB=cursession.Getdatabase(DBProfile.CMSServer(0), DBProfile.CMSFilePath(0))
+        Set sysProfile=CMS_DB.GetProfileDocument("SystemProfile")
+        Dim agent As NotesAgent
+        Dim db As NotesDatabase
+        Dim xMailKey As String
+        Set dummydoc=curdb.CreateDocument
+        dummydoc.Form="fTmpDummy"
+        
+        'Final Petition '20210628 先執行F Petition程式 : petitionfinal
+        Set mailDB=cursession.GetDatabase(sysProfile.cmspetitionFServer(0), sysProfile.cmspetitionFFilePath(0),False)
+        If Not(mailDB Is Nothing) Then        
+                '15. 自動CMS審閱表單轉用印表單功能 -CreatePetition
+                Call NotifyProcessMailDoc("petitionfinal","CreatePetition") '處理文件通知
+                Call RunAgentByName("CreatePetition")
+                '13. 檢查CMS 文件是否已轉用印 - CmsGcmsLegalIndexCheck
+                'Call NotifyProcessMailDoc("petitionfinal","CmsGcmsLegalIndexCheck") '處理文件通知
+                Call RunAgentByName("CmsGcmsLegalIndexCheck")
+                '14. 將petition檔案附上文件 - CmsGcmsLegalIndex
+                Call NotifyProcessMailDoc("petitionfinal","CmsGcmsLegalIndex") '處理文件通知
+                Call RunAgentByName("CmsGcmsLegalIndex")
+                
+        End If
+        
+        'S - Final : sfinal
+        Set mailDB=cursession.GetDatabase(sysProfile.cmssfinalServer(0), sysProfile.cmssfinalFilePath(0),False)
+        If Not(mailDB Is Nothing) Then
+                xMailKey="sfinal"
+                Call SetDummyValByMailKey(dummydoc,xMailKey) 
+                
+                If dummydoc.xInBoxKey(0)<>"" Then
+                        Call RunNonFinalChkAgentByDummyDoc(dummydoc,xMailKey)        '1. 檢查CMS 文件是否已轉用印
+                        Call NotifyProcessMailDoc(xMailKey,"(CmsGcmsFinalFormalAgentByMailDb)") '處理文件通知
+                        Call RunProcessMailAgentByDummyDoc(dummydoc,xMailKey)        '2. 將加密後檔案附上CMS 用印表單 (若是審閱表單僅畫中間表格)
+                End If
+        End If
+        'G - Final(agent 說明同S- Final) : gfinal
+        Set mailDB=cursession.GetDatabase(sysProfile.cmsgfinalServer(0), sysProfile.cmsgfinalFilePath(0),False)
+        If Not(mailDB Is Nothing) Then 
+                xMailKey="gfinal"
+                Call SetDummyValByMailKey(dummydoc,xMailKey) 
+                
+                If dummydoc.xInBoxKey(0)<>"" Then
+                        Call RunNonFinalChkAgentByDummyDoc(dummydoc,xMailKey)        '3. 檢查CMS 文件是否已轉用印
+                        Call NotifyProcessMailDoc(xMailKey,"(CmsGcmsFinalFormalAgentByMailDb)") '處理文件通知
+                        Call RunProcessMailAgentByDummyDoc(dummydoc,xMailKey)        '4. 將加密後檔案附上CMS 用印表單 (若是審閱表單僅畫中間表格)
+                End If
+        End If
+        'A - Final : afinal
+        Set mailDB=cursession.GetDatabase(sysProfile.cmsafinalServer(0), sysProfile.cmsafinalFilePath(0),False)
+        If Not(mailDB Is Nothing) Then
+                xMailKey="afinal"
+                Call SetDummyValByMailKey(dummydoc,xMailKey) 
+                
+                If dummydoc.xInBoxKey(0)<>"" Then
+                        Call RunNonFinalChkAgentByDummyDoc(dummydoc,xMailKey)        '5. 檢查CMS 文件是否已轉用印
+                        Call NotifyProcessMailDoc(xMailKey,"(CmsGcmsFinalFormalAgentByMailDb)") '處理文件通知
+                        Call RunProcessMailAgentByDummyDoc(dummydoc,xMailKey)        '6. 將加密後檔案附上CMS 用印表單 (若是審閱表單僅畫中間表格)
+                End If
+        End If
+        'D - Final : dfinal
+        Set mailDB=cursession.GetDatabase(sysProfile.cmsdfinalServer(0), sysProfile.cmsdfinalFilePath(0),False)
+        If Not(mailDB Is Nothing) Then
+                xMailKey="dfinal"
+                Call SetDummyValByMailKey(dummydoc,xMailKey) 
+                
+                If dummydoc.xInBoxKey(0)<>"" Then
+                        Call RunNonFinalChkAgentByDummyDoc(dummydoc,xMailKey)        '7. 檢查CMS 文件是否已轉用印                        
+                        Call NotifyProcessMailDoc(xMailKey,"(CmsGcmsFinalFormalAgentByMailDb)") '處理文件通知                        
+                        Call RunProcessMailAgentByDummyDoc(dummydoc,xMailKey)        '8. 將加密後檔案附上CMS 用印表單 (若是審閱表單僅畫中間表格)
+                End If
+        End If
+        'C - Final : cfinal
+        Set mailDB=cursession.GetDatabase(sysProfile.cmscfinalServer(0), sysProfile.cmscfinalFilePath(0),False)
+        If Not(mailDB Is Nothing) Then
+                xMailKey="cfinal"
+                Call SetDummyValByMailKey(dummydoc,xMailKey) 
+                
+                If dummydoc.xInBoxKey(0)<>"" Then
+                        Call RunNonFinalChkAgentByDummyDoc(dummydoc,xMailKey)        '9. 檢查CMS 文件是否已轉用印                        
+                        Call NotifyProcessMailDoc(xMailKey,"(CmsGcmsFinalFormalAgentByMailDb)") '處理文件通知                        
+                        Call RunProcessMailAgentByDummyDoc(dummydoc,xMailKey)        '10. 將加密後檔案附上CMS 用印表單 (若是審閱表單僅畫中間表格)
+                End If
+        End If
+        'GA - Final : gafinal
+        Set mailDB=cursession.GetDatabase(sysProfile.cmsgafinalServer(0), sysProfile.cmsgafinalFilePath(0),False)
+        If Not(mailDB Is Nothing) Then
+                xMailKey="gafinal"
+                Call SetDummyValByMailKey(dummydoc,xMailKey) 
+                
+                If dummydoc.xInBoxKey(0)<>"" Then
+                        Call RunNonFinalChkAgentByDummyDoc(dummydoc,xMailKey)        '11. 檢查CMS 文件是否已轉用印                        
+                        Call NotifyProcessMailDoc(xMailKey,"(CmsGcmsFinalFormalAgentByMailDb)") '處理文件通知                        
+                        Call RunProcessMailAgentByDummyDoc(dummydoc,xMailKey)        '12. 將加密後檔案附上CMS 用印表單 (若是審閱表單僅畫中間表格)
+                End If
+        End If        
+'-- 202403 CMS & GCMS add B、M Type         
+        'B - Final : bfinal
+        Set mailDB=cursession.GetDatabase(sysProfile.cmsbfinalServer(0), sysProfile.cmsbfinalFilePath(0),False)
+        If Not(mailDB Is Nothing) Then
+                xMailKey="bfinal"
+                Call SetDummyValByMailKey(dummydoc,xMailKey) 
+                
+                If dummydoc.xInBoxKey(0)<>"" Then
+                        Call RunNonFinalChkAgentByDummyDoc(dummydoc,xMailKey)        '13. 檢查CMS 文件是否已轉用印                        
+                        Call NotifyProcessMailDoc(xMailKey,"(CmsGcmsFinalFormalAgentByMailDb)") '處理文件通知                        
+                        Call RunProcessMailAgentByDummyDoc(dummydoc,xMailKey)        '14. 將加密後檔案附上CMS 用印表單 (若是審閱表單僅畫中間表格)
+                End If
+        End If
+        'M - Final : mfinal
+        Set mailDB=cursession.GetDatabase(sysProfile.cmsmfinalServer(0), sysProfile.cmsmfinalFilePath(0),False)
+        If Not(mailDB Is Nothing) Then
+                xMailKey="mfinal"
+                Call SetDummyValByMailKey(dummydoc,xMailKey) 
+                
+                If dummydoc.xInBoxKey(0)<>"" Then
+                        Call RunNonFinalChkAgentByDummyDoc(dummydoc,xMailKey)        '15. 檢查CMS 文件是否已轉用印                        
+                        Call NotifyProcessMailDoc(xMailKey,"(CmsGcmsFinalFormalAgentByMailDb)") '處理文件通知                        
+                        Call RunProcessMailAgentByDummyDoc(dummydoc,xMailKey)        '16. 將加密後檔案附上CMS 用印表單 (若是審閱表單僅畫中間表格)
+                End If
+        End If        
+'202411 U Type        
+        'U - Final : ufinal
+        Set mailDB=cursession.GetDatabase(sysProfile.cmsufinalServer(0), sysProfile.cmsufinalFilePath(0),False)
+        If Not(mailDB Is Nothing) Then
+                xMailKey="ufinal"
+                Call SetDummyValByMailKey(dummydoc,xMailKey) 
+                
+                If dummydoc.xInBoxKey(0)<>"" Then
+                        Call RunNonFinalChkAgentByDummyDoc(dummydoc,xMailKey)        '13. 檢查CMS 文件是否已轉用印                        
+                        Call NotifyProcessMailDoc(xMailKey,"(CmsGcmsFinalFormalAgentByMailDb)") '處理文件通知                        
+                        Call RunProcessMailAgentByDummyDoc(dummydoc,xMailKey)        '14. 將加密後檔案附上CMS 用印表單 (若是審閱表單僅畫中間表格)
+                End If
+        End If
+'202501 T Type        
+        'T - Final : tfinal
+        Set mailDB=cursession.GetDatabase(sysProfile.cmstfinalServer(0), sysProfile.cmstfinalFilePath(0),False)
+        If Not(mailDB Is Nothing) Then
+                xMailKey="tfinal"
+                Call SetDummyValByMailKey(dummydoc,xMailKey) 
+                
+                If dummydoc.xInBoxKey(0)<>"" Then
+                        Call RunNonFinalChkAgentByDummyDoc(dummydoc,xMailKey)        '13. 檢查CMS 文件是否已轉用印                        
+                        Call NotifyProcessMailDoc(xMailKey,"(CmsGcmsFinalFormalAgentByMailDb)") '處理文件通知                        
+                        Call RunProcessMailAgentByDummyDoc(dummydoc,xMailKey)        '14. 將加密後檔案附上CMS 用印表單 (若是審閱表單僅畫中間表格)
+                End If
+        End If
+        
+        'Final Petition : petitionfinal
+        Set mailDB=cursession.GetDatabase(sysProfile.cmspetitionFServer(0), sysProfile.cmspetitionFFilePath(0),False)
+        If Not(mailDB Is Nothing) Then
+                '將這一批已經附上簽呈與合約的申請單產生簽呈
+                'Call NotifyProcessMailDoc("petitionfinal","CreatePetition") '處理文件通知
+                Call RunAgentByName("CreatePetition") 
+        End If
+        
+        If Not(dummydoc Is Nothing) Then Call dummydoc.Remove(True)
+        
+        Exit Sub        
+        
+err_handle:
+        Call NotifyErrHandle("Initialize",Nothing)
+        If Not(dummydoc Is Nothing) Then Call dummydoc.Remove(True)
+        Exit Sub
+End Sub
+Function RunNonFinalChkAgentByDummyDoc(DummyDoc As NotesDocument,xMailKey As String)
+'1. 依 Final Mailbox 檢查CMS 文件是否已轉用印 - Call 整合程式 (CmsGcmsNonFinalCheckFormalAgentByMailDb)
+        On Error Goto err_handle
+        
+        If DummyDoc.xInBoxKey(0)="" Then Exit Function
+        
+        Set agent=curdb.GetAgent("(CmsGcmsNonFinalCheckFormalAgentByMailDb)")
+        If Not(agent Is Nothing) Then
+                If cursession.IsOnServer Then
+                        If agent.Run(DummyDoc.NoteID)=0 Then Sleep(1)
+                Else
+                        If agent.RunOnServer(DummyDoc.NoteID)=0 Then Sleep(1)
+                End If
+        End If
+        
+        Exit Function
+        
+err_handle:
+        Call NotifyErrHandle("RunNonFinalChkAgentByDummyDoc - "+xMailKey,Nothing)
+        Exit Function
+End Function
+Sub SetDummyValByMailKey(doc As NotesDocument,xMailKey As String)
+        On Error Goto err_handle
+        
+        xInBoxKey=""
+        xSrcType=""
+        xMailViewNa=""
+        xMailViewNonChkNa=""
+        xProcFlagFieldNa=""        
+        
+        doc.xmailServer=mailDB.server
+        doc.xmailFilePath=mailDB.FilePath
+        If xMailKey="sfinal" Then
+                xInBoxKey="cmssfinal" 
+                xSrcType="cmsfinal" 
+                xMailViewNa="FinalFormalNonupdateMail"
+                xMailViewNonChkNa="(FinalFormalNonCheckNonupdateMail)"
+                xProcFlagFieldNa="CmsGcmsFinalFormalUpdateFlag"
+        Elseif xMailKey="gfinal" Then
+                xInBoxKey="cmsgfinal" 
+                xSrcType="cmsfinal" 
+                xMailViewNa="FinalNonupdateMail"
+                xMailViewNonChkNa="NonFinalcheckNonupdateMail"
+                xProcFlagFieldNa="CmsGcmsFinalGUpdateFlag"
+        Elseif xMailKey="afinal" Then
+                xInBoxKey="cmsafinal" 
+                xSrcType="cmsfinal" 
+                xMailViewNa="FinalNonupdateMail"
+                xMailViewNonChkNa="NonFinalcheckNonupdateMail"
+                xProcFlagFieldNa="CmsGcmsFinalAUpdateFlag"
+        Elseif xMailKey="dfinal" Then
+                xInBoxKey="cmsdfinal" 
+                xSrcType="cmsfinal" 
+                xMailViewNa="FinalNonupdateMail"
+                xMailViewNonChkNa="NonFinalcheckNonupdateMail"
+                xProcFlagFieldNa="CmsGcmsFinalDUpdateFlag"
+        Elseif xMailKey="cfinal" Then
+                xInBoxKey="cmscfinal" 
+                xSrcType="cmsfinal" 
+                xMailViewNa="FinalNonupdateMail"
+                xMailViewNonChkNa="NonFinalcheckNonupdateMail"
+                xProcFlagFieldNa="CmsGcmsFinalCUpdateFlag"
+        Elseif xMailKey="gafinal" Then
+                xInBoxKey="cmsgafinal" 
+                xSrcType="cmsfinal" 
+                xMailViewNa="FinalGANonupdateMail"
+                xMailViewNonChkNa="(FinalGANonCheckNonupdateMail)"
+                xProcFlagFieldNa="CmsGcmsFinalGAUpdateFlag"
+'-- 202403 CMS & GCMS add B、M Type                
+        Elseif xMailKey="bfinal" Then
+                xInBoxKey="cmsbfinal" 
+                xSrcType="cmsfinal" 
+                xMailViewNa="FinalNonupdateMail"
+                xMailViewNonChkNa="NonFinalcheckNonupdateMail"
+                xProcFlagFieldNa="CmsGcmsFinalBUpdateFlag"
+        Elseif xMailKey="mfinal" Then
+                xInBoxKey="cmsmfinal" 
+                xSrcType="cmsfinal" 
+                xMailViewNa="FinalNonupdateMail"
+                xMailViewNonChkNa="NonFinalcheckNonupdateMail"
+                xProcFlagFieldNa="CmsGcmsFinalMUpdateFlag"
+'202411
+        Elseif xMailKey="ufinal" Then
+                xInBoxKey="cmsufinal" 
+                xSrcType="cmsfinal" 
+                xMailViewNa="FinalNonupdateMail"
+                xMailViewNonChkNa="NonFinalcheckNonupdateMail"
+                xProcFlagFieldNa="CmsGcmsFinalUUpdateFlag"        
+        Elseif xMailKey="tfinal" Then '202501
+                xInBoxKey="cmstfinal" 
+                xSrcType="cmsfinal" 
+                xMailViewNa="FinalNonupdateMail"
+                xMailViewNonChkNa="NonFinalcheckNonupdateMail"
+                xProcFlagFieldNa="CmsGcmsFinalTUpdateFlag"                        
+        End If        
+        doc.xInBoxKey=xInBoxKey 'cmssfinal
+        doc.xSrcType=xSrcType 'cmsfinal
+        doc.xMailViewNa=xMailViewNa
+        doc.xMailViewNonChkNa=xMailViewNonChkNa
+        doc.xProcFlagFieldNa=xProcFlagFieldNa
+        
+        Call doc.Save(True,False)
+        
+        If doc.xInBoxKey(0)="" Then
+                xsbj="agFinalMailProcess "+xMailKey+" 找不到Mail DB相關資訊"
+                Set maildoc=curdb.CreateDocument
+                maildoc.sendto=Evaluate(|"Elaine Liang/TAIWAN/MXIC":"Yorkhsu Lin/TAIWAN/MXIC":"Arwin Chang/TAIWAN/MXIC"|)        
+                maildoc.Subject = xsbj
+                maildoc.form="Memo"
+                maildoc.PostedDate=Now
+                Set rt=maildoc.CreateRichTextItem("Body")
+                Call rt.AppendText(xsbj)
+                Call maildoc.Send(False)
+        End If
+        
+        Exit Sub
+        
+err_handle:
+        Call NotifyErrHandle("SetDummyValByMailKey - "+xMailKey,Nothing)
+        Exit Sub
+        
+End Sub
+Function RunProcessMailAgentByDummyDoc(DummyDoc As NotesDocument,xMailKey As String)
+'2. 依 Final Mailbox 將加密後檔案附上CMS 用印表單 (若是審閱表單僅畫中間表格) - Call 整合程式 (CmsGcmsFinalFormalAgentByMailDb)
+        On Error Goto err_handle
+        
+        If DummyDoc.xInBoxKey(0)="" Then Exit Function
+        
+        Set agent=curdb.GetAgent("(CmsGcmsFinalFormalAgentByMailDb)")
+        If Not(agent Is Nothing) Then
+                If cursession.IsOnServer Then
+                        If agent.Run(DummyDoc.NoteID)=0 Then Sleep(1)
+                Else
+                        If agent.RunOnServer(DummyDoc.NoteID)=0 Then Sleep(1)
+                End If
+        End If
+        
+        Exit Function
+        
+err_handle:
+        Call NotifyErrHandle("RunProcessMailAgentByDummyDoc - "+xMailKey ,Nothing)
+        Exit Function
+End Function
+Sub NotifyProcessMailDoc(xInBoxNa As String,agentNa As String)
+        '處理文件通知
+        On Error Goto err_handle
+        Dim view As NotesView
+        Dim vdoc As NotesDocument
+        Dim vdocN As NotesDocument
+        Dim viewNa As String
+        Dim vc As NotesViewEntryCollection
+        Dim maildoc As NotesDocument
+        Dim rt As NotesRichTextItem
+        'Dim xChkViewNaList As Variant
+        Dim xsbj As String
+        If xInBoxNa="petitionfinal" Then                
+                If agentNa="CreatePetition" Then '15. 自動CMS審閱表單轉用印表單功能 - CreatePetition
+                        viewNa="CreatePetition"
+                Elseif agentNa="CmsGcmsLegalIndexCheck" Then '13. 檢查CMS 文件是否已轉用印 - CmsGcmsLegalIndexCheck
+                        viewNa="NonLegalcheckNonupdateMail"        
+                Elseif agentNa="CmsGcmsLegalIndex" Then '14. 將petition檔案附上文件 - CmsGcmsLegalIndex
+                        viewNa="LegalIndexNonupdateMail"        
+                End If
+        Elseif xInBoxNa="sfinal" Then
+                If agentNa="CmsGcmsNonFinalCheckFormalAgent" Or agentNa="(CmsGcmsNonFinalCheckFormalAgentByMailDb)" Then '1. 檢查CMS 文件是否已轉用印  -  CmsGcmsNonFinalCheckFormalAgent
+                        viewNa="(FinalFormalNonCheckNonupdateMail)"
+                Elseif agentNa="CmsGcmsFinalFormalAgent" Or agentNa="(CmsGcmsFinalFormalAgentByMailDb)" Then '2. 將加密後文件附上CMS 用印表單 (若是審閱表單僅畫中間表格) - CmsGcmsFinalFormalAgent
+                        viewNa="FinalFormalNonupdateMail"
+                End If
+        Elseif xInBoxNa="gfinal" Then
+                If agentNa="CmsGcmsNonFinalCheckGeneralAgent" Or agentNa="(CmsGcmsNonFinalCheckFormalAgentByMailDb)" Then '3.  CmsGcmsNonFinalCheckGeneralAgent
+                        viewNa="NonFinalcheckNonupdateMail"
+                Elseif agentNa="CmsGcmsFinalGeneralAgent" Or agentNa="(CmsGcmsFinalFormalAgentByMailDb)" Then '4.  CmsGcmsFinalGeneralAgent
+                        viewNa="FinalNonupdateMail"        
+                End If
+        Elseif xInBoxNa="afinal" Then
+                If agentNa="CmsGcmsNonFinalCheckAdhesionAgent" Or agentNa="(CmsGcmsNonFinalCheckFormalAgentByMailDb)" Then '5. CmsGcmsNonFinalCheckAdhesionAgent
+                        viewNa="NonFinalcheckNonupdateMail"
+                Elseif agentNa="CmsGcmsFinalAdhesionAgent" Or agentNa="(CmsGcmsFinalFormalAgentByMailDb)" Then '6. CmsGcmsFinalAdhesionAgent
+                        viewNa="FinalNonupdateMail"        
+                End If
+        Elseif xInBoxNa="dfinal" Then
+                If agentNa="CmsGcmsNonFinalCheckDAgent" Or agentNa="(CmsGcmsNonFinalCheckFormalAgentByMailDb)" Then '7. CmsGcmsNonFinalCheckDAgent
+                        viewNa="NonFinalcheckNonupdateMail"
+                Elseif agentNa="CmsGcmsFinalDAgent" Or agentNa="(CmsGcmsFinalFormalAgentByMailDb)" Then '8. CmsGcmsFinalDAgent
+                        viewNa="FinalNonupdateMail"
+                End If
+        Elseif xInBoxNa="cfinal" Then
+                If agentNa="CmsGcmsNonFinalCheckCAgent" Or agentNa="(CmsGcmsNonFinalCheckFormalAgentByMailDb)" Then '9. CmsGcmsNonFinalCheckCAgent
+                        viewNa="NonFinalcheckNonupdateMail"
+                Elseif agentNa="CmsGcmsFinalCAgent" Or agentNa="(CmsGcmsFinalFormalAgentByMailDb)" Then '10. CmsGcmsFinalCAgent
+                        viewNa="FinalNonupdateMail"        
+                End If
+        Elseif xInBoxNa="gafinal" Then
+                If agentNa="CmsGcmsNonFinalCheckGAAgent" Or agentNa="(CmsGcmsNonFinalCheckFormalAgentByMailDb)" Then '11. CmsGcmsNonFinalCheckGAAgent
+                        viewNa="(FinalGANonCheckNonupdateMail)"
+                Elseif agentNa="CmsGcmsFinalGAAgent" Or agentNa="(CmsGcmsFinalFormalAgentByMailDb)" Then '12. CmsGcmsFinalGAAgent
+                        viewNa="FinalGANonupdateMail"        
+                End If
+'-- 202403 CMS & GCMS add B、M Type 
+        Elseif xInBoxNa="bfinal" Then
+                If agentNa="(CmsGcmsNonFinalCheckFormalAgentByMailDb)" Then 
+                        viewNa="NonFinalcheckNonupdateMail"
+                Elseif agentNa="(CmsGcmsFinalFormalAgentByMailDb)" Then 
+                        viewNa="FinalNonupdateMail"        
+                End If
+        Elseif xInBoxNa="mfinal" Then
+                If agentNa="(CmsGcmsNonFinalCheckFormalAgentByMailDb)" Then 
+                        viewNa="NonFinalcheckNonupdateMail"
+                Elseif agentNa="(CmsGcmsFinalFormalAgentByMailDb)" Then 
+                        viewNa="FinalNonupdateMail"        
+                End If        
+        '202411 ufinal、202501 tfinal
+        Elseif xInBoxNa="ufinal" Or xInBoxNa="tfinal" Then
+                If agentNa="(CmsGcmsNonFinalCheckFormalAgentByMailDb)" Then 
+                        viewNa="NonFinalcheckNonupdateMail"
+                Elseif agentNa="(CmsGcmsFinalFormalAgentByMailDb)" Then 
+                        viewNa="FinalNonupdateMail"        
+                End If        
+                
+        End If        
+        If viewNa="" Then Exit Sub
+        
+        Set view=MailDb.GetView(viewNa)
+        If view Is Nothing Then
+                Call NotifyErrHandle("agFinalMailProcess \ NotifyProcessMailDoc : "+xInBoxNa+" / "+agentNa +" "+viewNa+" view is nothing",Nothing)
+                Exit Sub
+        End If
+        Set vc = view.AllEntries
+        If vc.Count=0 Then Exit Sub
+        
+        xsbj=xInBoxNa+" / "+agentNa+" 處理文件通知，共"+Cstr(vc.Count)+"筆("+Format(Now,"yyyy/mm/dd hh:mm:ss")+")"
+        Set maildoc=curdb.CreateDocument
+        maildoc.sendto=Evaluate(|"Elaine Liang/TAIWAN/MXIC":"Yorkhsu Lin/TAIWAN/MXIC":"Arwin Chang/TAIWAN/MXIC"|)        
+        maildoc.Subject = xsbj
+        maildoc.form="Memo"
+        maildoc.PostedDate=Now
+        Set rt=maildoc.CreateRichTextItem("Body")
+        Call rt.AppendText("處理文件內容如下 : ")
+        Set vdoc=view.GetFirstDocument()
+        i = 1
+        Do Until vdoc Is Nothing                
+                Set vdocN=view.GetNextDocument(vdoc)
+                Call rt.Addnewline(1)
+                Call rt.AppendText( Cstr(i) +"."+ vdoc.subject(0)+"  (Mail UNID=>"+vdoc.UniversalID+")" ) '2021917 調整內容                
+                'Call rt.AppendDocLink(vdoc,"Doc Link")
+                Set vdoc=vdocN
+                i=i+1
+        Loop
+        Call maildoc.Send(False)
+        
+        Exit Sub        
+        
+err_handle:
+        Call NotifyErrHandle("NotifyProcessMailDoc : "+xInBoxNa+" / "+agentNa,Nothing)
+        Exit Sub
+End Sub
+Function RunAgentByName(AgentNa As String)
+        Set agent=mailDB.GetAgent(AgentNa)
+        If Not(agent Is Nothing) Then
+                If cursession.IsOnServer Then
+                        If agent.Run()=0 Then Sleep(1)
+                Else
+                        If agent.RunOnServer()=0 Then Sleep(1)
+                End If
+        End If
+End Function
+Sub NotifyErrHandle(xFuncNa As String,mdoc As NotesDocument)
+        Dim errMailForm As New NotesDocument(curdb)
+        Dim errLink_doc As New NotesRichTextItem(errMailForm , "Body")
+        errMailForm.Form="Memo"
+        errMailForm.SendTo="Yorkhsu Lin/TAIWAN/MXIC"
+        errMailForm.CopyTo=Evaluate(|"Elaine Liang/TAIWAN/MXIC":"Arwin Chang/TAIWAN/MXIC"|)        
+        errMailForm.Subject="CMS agFinalMailProcess \ "+xFuncNa+" Error"
+        Call errLink_doc.AppendText("錯誤訊息："+Error+"(Err :"+Cstr(Err)+")")
+        Call errLink_doc.AddNewline(2)
+        Call errLink_doc.AppendText("錯誤行數："+ Cstr(Erl))
+        If Not(mdoc Is Nothing) Then
+                Call errLink_doc.AddNewline(2)
+                Call errLink_doc.Appenddoclink(mdoc,"Doc Link")
+        End If        
+        Call errMailForm.Send(False)
+        Exit Sub
+End Sub
